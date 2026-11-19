@@ -1,10 +1,15 @@
 {
-  "name": "house-dodge",
+  "name": "konbini-brainrot",
   "tree": {
     "$className": "DataModel",
     "Players": {
       "$properties": {
         "CharacterAutoLoads": false
+      }
+    },
+    "ReplicatedStorage": {
+      "Shared": {
+        "$path": "src/shared"
       }
     },
     "ServerScriptService": {
@@ -27,36 +32,22 @@
         "$className": "Part",
         "$properties": {
           "Anchored": true,
-          "Color": [
-            0.38823,
-            0.37254,
-            0.38823
-          ],
+          "Color": [0.09, 0.09, 0.12],
           "Locked": true,
-          "Position": [
-            0,
-            -10,
-            0
-          ],
-          "Size": [
-            512,
-            20,
-            512
-          ]
+          "Material": "Asphalt",
+          "Position": [0, -10, 0],
+          "Size": [700, 20, 700]
         }
       }
     },
     "Lighting": {
       "$properties": {
-        "Ambient": [
-          0,
-          0,
-          0
-        ],
+        "Ambient": [0.2, 0.18, 0.32],
         "Brightness": 2,
+        "ClockTime": 20.5,
         "GlobalShadows": true,
         "Outlines": false,
-        "Technology": "Voxel"
+        "Technology": "ShadowMap"
       }
     },
     "SoundService": {

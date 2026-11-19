@@ -21,6 +21,9 @@ import { buildDossier } from './vendor/makefun-roblox.ts';
 const here = fileURLToPath(new URL('.', import.meta.url));
 const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
+// Konbini Brainrot: the output folder is created here so a bare /output works the same as MAKEFUN_OUTPUT_DIR.
+mkdirSync(out, { recursive: true });
+
 /** cpSync's filter: leave out every file and directory whose name starts with a dot (.gitkeep, .DS_Store, .git). */
 const notDotted = (path: string): boolean => !basename(path).startsWith('.');
 
