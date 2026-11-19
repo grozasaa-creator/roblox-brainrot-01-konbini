@@ -1,21 +1,30 @@
-# roblox-brainrot-01 starter
+# Konbini Brainrot
 
-A working entry for make.fun's "Make the best AI Roblox brainrot game" bounty (roblox-brainrot-01), laid out as your
-repository: a Rojo project whose game is a grey square that moves with the arrow keys. It is a starting point, not a
-winner, and not yet the 3D game the bounty asks for: its square is drawn on the screen, not in Roblox's 3D world.
+A 3D Roblox game for make.fun's roblox-brainrot-01 bounty. A neon-lit night town of convenience stores is overrun by
+original "brainrot" critters. Catch them, run them home, and let them earn while you are away.
 
-- `main.ts` (Node 22, standard library only) hands the game in: it copies `game.rbxl`, `src/`, `screenshots/` and
-  `PLAY.json` to `/output`, leaving out every name that starts with a dot (such as `.gitkeep` or `.DS_Store`, which
-  fail an entry), and writes `/output/dossier.json` with `vendor/makefun-roblox.ts`, the kit's copy, unchanged.
-- `game.rbxl` is the place Rojo builds from `src/` and `default.project.json`; `screenshots/` holds three captures of
-  it; `PLAY.json` names no place yet, so the gate refuses the starter as it stands until it names your published one.
-- One of your screenshots must also be your game's first thumbnail on Roblox: the same picture, uploaded on the
-  Creator Dashboard with your game's icon.
-- `TOUR.json` is an example of the optional tour: for each screenshot, the keys that bring the game to that screen.
+## The loop
 
-Run it as the grader does, writing `out/` in place of `/output`:
+1. Hold E on a wild critter to catch it. Carrying it slows you down.
+2. Run it into your own base: it is placed on a pedestal and starts earning money per second.
+3. Collect the pedestal's meter, then spend it: buy critters off the conveyor belt, unlock the next rarity tier,
+   buy dash boots, or rebirth for a permanent income multiplier.
+
+15 original characters in 6 rarity tiers (Common, Rare, Epic, Legendary, Mythic, Secret), with three mutations
+(Gold, Neon, Glitch) that multiply income. A Codex (press C) tracks what you have found.
+
+## Threats
+
+- **Neon Tide**: a warning, then a wave sweeps the street. Be inside a base or a konbini or you drop what you carry.
+- **Stealing**: hold F near a carried critter or a pedestal to take it. Lock your base to protect your pedestals.
+- **Security robots** patrol the street and make carriers drop their catch.
+
+## Layout
+
+- `src/shared`: constants, rarity, mutations, characters, character models, economy, remotes.
+- `src/server`: one service per responsibility (world, base, spawn, carry, steal, patrol, tide, actions, state, saving).
+- `src/client`: display and input only (HUD, labels, carry keys, effects, codex). The server decides everything.
+- `default.project.json`: Rojo project. `rojo build default.project.json --output game.rbxl` builds `game.rbxl`.
+- `main.ts`: hands the entry in (copies `game.rbxl`, `src/`, `screenshots/`, `PLAY.json` and writes `dossier.json`).
 
     mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
-
-The rules are on the bounty's page (/bounty/roblox-brainrot-01) and in the kit's RULES.txt,
-which gives every command in order (Before you submit, then Enter).
