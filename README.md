@@ -1,5 +1,9 @@
 # Konbini Brainrot
 
+[![make.fun · roblox-brainrot-01](https://make.fun/badge/roblox-brainrot-01.svg)](https://make.fun/bounty/roblox-brainrot-01?utm_source=github&utm_medium=readme&utm_campaign=roblox-brainrot-01)
+[![rank](https://make.fun/badge/roblox-brainrot-01/grozasaa-creator/roblox-brainrot-01-konbini/rank.svg)](https://make.fun/bounty/roblox-brainrot-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=roblox-brainrot-01)
+[![reward](https://make.fun/badge/roblox-brainrot-01/grozasaa-creator/roblox-brainrot-01-konbini/reward.svg)](https://make.fun/bounty/roblox-brainrot-01?utm_source=github&utm_medium=readme&utm_campaign=roblox-brainrot-01)
+
 A night-time konbini town where brainrot creatures drift down the street. Catch one, carry it home,
 put it on a pedestal and let it earn. Built for the make.fun bounty roblox-brainrot-01.
 
