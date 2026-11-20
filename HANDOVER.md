@@ -1,17 +1,11 @@
-# HANDOVER（現在状態のみ）
+# HANDOVER: Konbini Brainrot v2 (2026-11-20)
 
-## できている
-- src/（shared 7・server 13・client 6）を実装。全 luau が luau-compile を通過、`rojo build` で game.rbxl（約39KB）を生成。
-- main.ts に1行追加済み、.gitignore 作成済み、README・TOUR.json・前提カード・risk_notes を更新。
-- main.ts の2回実行でコピー物のハッシュは同一（ただし screenshots が空なので dossier.json は作れず終了コード1）。
+## 現在状態
+- 全30 .luau が luau-compile を通過。luau-analyze は Roblox グローバル由来以外の指摘なし。
+- rojo で game.rbxl ビルド成功。`MAKEFUN_OUTPUT_DIR=out node main.ts` は終了コード0、dossier.json 生成。
+- git commit 済み（push は本人）。
 
-## 本人待ち / 未決
-- Studio で game.rbxl を開き、File → Publish to Roblox → Create new game（名前・説明にドット入りの URL 風文字列を入れない）。ログイン画面なら「ログイン待ち」。
-- 公開後に place_id / universe_id を PLAY.json へ。`node cli/makefun.mjs check --repo <repo> --play-code 0`（0〜3）で play code を取り、Game Settings の説明に貼る。
-- Studio で実機プレイして screenshots/ に 3〜4 枚（各 256KiB 以下、1-cover.png が Roblox の最初のサムネと同一）。TOUR.json の名前は 1-cover / 2-catch / 3-base / 4-tide。
-- Creator Dashboard でアイコン・サムネ・説明・ジャンル・年齢質問まで進め、最後の Public ボタンは本人。
-- 録画の封印（~/.makefun/record-roblox-brainrot-01.pid を kill）と kit の check、提出。
-
-## 抜いた
-- Luau の実機動作は未確認（Studio を操作する手段がこのセッションに無い）。型検査は Roblox グローバル未登録のため構文のみ確認。
-- スクリーンショット未作成（偽の画像で代用しない）。
+## 未決・未確認
+- Studio での実プレイ未確認（コンパイルと静的解析のみ）。パトロール軌道84、ガイド矢印、PromptGate の挙動は要実機。
+- TOUR.json の keys/call 形式はキット記述を要約から再現したもの。要確認。
+- 抜いた: 実機スクリーンショットの撮り直し（既存4枚を使用）。

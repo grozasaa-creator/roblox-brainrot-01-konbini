@@ -1,104 +1,125 @@
--- 図鑑パネル。15キャラの発見状況と、見つけた変異（Gold / Neon / Glitch）を表示する。C キーかボタンで開閉。
+-- Codex: a list of all 15 characters. Found ones show name, rarity and income; unseen ones are "???".
+-- Each row is a frame of column labels, so no text can run past its own cell.
+
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Characters = require(ReplicatedStorage.Shared.Characters)
-local Rarity = require(ReplicatedStorage.Shared.Rarity)
-local Mutations = require(ReplicatedStorage.Shared.Mutations)
-local Economy = require(ReplicatedStorage.Shared.Economy)
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Characters = require(Shared.Characters)
+local Economy = require(Shared.Economy)
+local Rarity = require(Shared.Rarity)
+
+local UiKit = require(script.Parent.UiKit)
+local ClientState = require(script.Parent.ClientState)
 
 local CodexUi = {}
 
-local function mutationFlags(entry): string
-	local found = {}
-	for _, mutation in ipairs(Mutations.list) do
-		if entry and entry[mutation.id] then
-			table.insert(found, mutation.id)
-		end
-	end
-	return #found > 0 and table.concat(found, " / ") or "-"
+local C = UiKit.Colors
+local panel
+local countLabel
+local rows = {}
+
+local ROW_H = 46
+
+local function makeRow(parent, def, order)
+	local row = UiKit.frame(parent, {
+		Size = UDim2.new(1, -8, 0, ROW_H),
+		BackgroundColor3 = C.PanelLight,
+		LayoutOrder = order,
+	})
+	UiKit.corner(row, 0.2)
+	local swatch = UiKit.frame(row, {
+		Position = UDim2.fromScale(0.015, 0.2),
+		Size = UDim2.fromScale(0.04, 0.6),
+		BackgroundColor3 = C.Dim,
+	})
+	UiKit.corner(swatch, 0.5)
+	local name = UiKit.label(row, "???", { Position = UDim2.fromScale(0.07, 0), Size = UDim2.fromScale(0.4, 1), TextXAlignment = Enum.TextXAlignment.Left }, { MaxText = 22, pad = 0.12 })
+	local rar = UiKit.label(row, "", { Position = UDim2.fromScale(0.48, 0), Size = UDim2.fromScale(0.2, 1) }, { MaxText = 18, pad = 0.15 })
+	local inc = UiKit.label(row, "", { Position = UDim2.fromScale(0.69, 0), Size = UDim2.fromScale(0.3, 1), TextColor3 = C.Gold, TextXAlignment = Enum.TextXAlignment.Right }, { MaxText = 18, pad = 0.15 })
+	return { swatch = swatch, name = name, rar = rar, inc = inc, def = def }
 end
 
-function CodexUi.create(playerGui: PlayerGui, hud)
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "KonbiniCodex"
-	gui.ResetOnSpawn = false
-	gui.Enabled = false
-	gui.Parent = playerGui
-
-	local panel = Instance.new("Frame")
-	panel.Size = UDim2.fromOffset(640, 440)
-	panel.Position = UDim2.new(0.5, -320, 0.5, -220)
-	panel.BackgroundColor3 = Color3.fromRGB(20, 18, 36)
-	panel.BorderSizePixel = 0
-	panel.Parent = gui
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 14)
-	corner.Parent = panel
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.fromRGB(255, 130, 220)
-	stroke.Thickness = 3
-	stroke.Parent = panel
-
-	local title = Instance.new("TextLabel")
-	title.Size = UDim2.new(1, 0, 0, 44)
-	title.BackgroundTransparency = 1
-	title.Font = Enum.Font.GothamBlack
-	title.TextSize = 26
-	title.TextColor3 = Color3.new(1, 1, 1)
-	title.Parent = panel
-
-	local list = Instance.new("ScrollingFrame")
-	list.Position = UDim2.fromOffset(12, 48)
-	list.Size = UDim2.new(1, -24, 1, -60)
-	list.BackgroundTransparency = 1
-	list.BorderSizePixel = 0
-	list.ScrollBarThickness = 6
-	list.AutomaticCanvasSize = Enum.AutomaticSize.Y
-	list.CanvasSize = UDim2.new()
-	list.Parent = panel
-	local layout = Instance.new("UIListLayout")
-	layout.Padding = UDim.new(0, 4)
-	layout.Parent = list
-
-	local rows = {}
-	for index, def in ipairs(Characters.list) do
-		local row = Instance.new("TextLabel")
-		row.LayoutOrder = index
-		row.Size = UDim2.new(1, -8, 0, 26)
-		row.BackgroundColor3 = Color3.fromRGB(34, 30, 56)
-		row.BorderSizePixel = 0
-		row.Font = Enum.Font.GothamBold
-		row.TextSize = 15
-		row.TextXAlignment = Enum.TextXAlignment.Left
-		row.TextColor3 = Color3.new(1, 1, 1)
-		row.Parent = list
-		rows[def.id] = row
+local function refresh(s)
+	if not panel then
+		return
 	end
-
-	local function refresh(state)
-		local owned = 0
-		for _, def in ipairs(Characters.list) do
-			local entry = state.codex[def.id]
-			local row = rows[def.id]
-			if entry then
-				owned += 1
-				row.Text = string.format("  %s   [%s]   $%s/s   x%d   Mutations: %s", def.name, def.rarity, Economy.formatMoney(def.income), entry.count, mutationFlags(entry))
-				row.TextColor3 = Rarity.byName[def.rarity].color
-			else
-				row.Text = "  ???   [" .. def.rarity .. "]"
-				row.TextColor3 = Color3.fromRGB(110, 110, 130)
-			end
+	local found = 0
+	for _, r in ipairs(rows) do
+		local seen = s.seen[r.def.id] == true
+		local col = Rarity.get(Rarity.indexOf(r.def.rarity)).color
+		if seen then
+			found += 1
+			r.swatch.BackgroundColor3 = col
+			r.name.Text = r.def.name
+			r.name.TextColor3 = col
+			r.rar.Text = string.upper(r.def.rarity)
+			r.rar.TextColor3 = col
+			r.inc.Text = Economy.money(r.def.income) .. "/s"
+		else
+			r.swatch.BackgroundColor3 = C.Dim
+			r.name.Text = "???"
+			r.name.TextColor3 = C.Dim
+			r.rar.Text = string.upper(r.def.rarity)
+			r.rar.TextColor3 = C.Dim
+			r.inc.Text = "?"
 		end
-		title.Text = "CODEX  " .. owned .. " / " .. #Characters.list
 	end
+	countLabel.Text = "CODEX  " .. found .. "/" .. #Characters.List
+end
 
-	hud.listen(function(event, state)
-		if event == "toggleCodex" then
-			gui.Enabled = not gui.Enabled
-		elseif event == "state" then
-			refresh(state)
-		end
+function CodexUi.toggle()
+	if panel then
+		panel.Visible = not panel.Visible
+	end
+end
+
+function CodexUi.start()
+	local gui = UiKit.screenGui("KonbiniCodex", 4)
+	panel = UiKit.frame(gui, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromScale(0.6, 0.72),
+		Visible = false,
+	})
+	UiKit.limitSize(panel, 300, 260, 720, 560)
+	UiKit.corner(panel, 0.04)
+	UiKit.stroke(panel, C.Pink, 3)
+
+	countLabel = UiKit.label(panel, "CODEX", { Position = UDim2.fromScale(0.04, 0.02), Size = UDim2.fromScale(0.7, 0.09), TextColor3 = C.Pink, TextXAlignment = Enum.TextXAlignment.Left }, { MaxText = 34, pad = 0.06 })
+	local close = UiKit.button(panel, "X", {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.fromScale(0.97, 0.025),
+		Size = UDim2.fromScale(0.09, 0.08),
+		BackgroundColor3 = C.Red,
+	}, { MaxText = 26 })
+	close.Activated:Connect(function()
+		panel.Visible = false
 	end)
+
+	local scroll = Instance.new("ScrollingFrame")
+	scroll.Position = UDim2.fromScale(0.03, 0.13)
+	scroll.Size = UDim2.fromScale(0.94, 0.84)
+	scroll.BackgroundTransparency = 1
+	scroll.BorderSizePixel = 0
+	scroll.ScrollBarThickness = 6
+	scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+	scroll.Parent = panel
+	local list = Instance.new("UIListLayout")
+	list.Padding = UDim.new(0, 5)
+	list.SortOrder = Enum.SortOrder.LayoutOrder
+	list.Parent = scroll
+
+	for i, def in ipairs(Characters.List) do
+		rows[i] = makeRow(scroll, def, i)
+	end
+
+	gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+	ClientState.SnapshotChanged:Connect(refresh)
+	if ClientState.snapshot then
+		refresh(ClientState.snapshot)
+	end
 end
 
 return CodexUi

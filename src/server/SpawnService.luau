@@ -1,225 +1,148 @@
--- 街を歩く野良キャラと、中央ベルトを流れる売り物キャラの出現・移動・購入。
-local RunService = game:GetService("RunService")
+-- Wild brainrot: spawn at the west end of the lane, drift east, vanish at the far end. Dropped characters
+-- sit where they fell for a while so anyone can grab them.
 
-local Config = require(game.ReplicatedStorage.Shared.Config)
-local Characters = require(game.ReplicatedStorage.Shared.Characters)
-local Rarity = require(game.ReplicatedStorage.Shared.Rarity)
-local Mutations = require(game.ReplicatedStorage.Shared.Mutations)
-local Economy = require(game.ReplicatedStorage.Shared.Economy)
-local CharacterModel = require(game.ReplicatedStorage.Shared.CharacterModel)
-local PlayerState = require(script.Parent.PlayerState)
-local BaseService = require(script.Parent.BaseService)
-local Notice = require(script.Parent.Notice)
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Rarity = require(Shared.Rarity)
+local Mutations = require(Shared.Mutations)
+local Characters = require(Shared.Characters)
+local CharacterModel = require(Shared.CharacterModel)
 
 local SpawnService = {}
 
--- GameServer が差し込む。野良キャラを捕まえたときの処理（CarryService 側）。
+-- set by GameServer: (player, model) -> void
 SpawnService.onCatch = nil
 
-local wilds = {} -- { model =, target =, nextTurn = }
-local beltItems = {} -- { model =, x = }
-local shelters = {}
-local wildFolder
-local beltFolder
-local clock = 0
+local rng = Random.new()
+local wild = {} -- model -> { drift = number, expires = number?, phase = number, y = number, x = number, z = number }
+local folder = nil
+local sinceSpawn = 0
 
-local function pickDefinition(rarityName: string)
-	local pool = Characters.byRarity[rarityName]
-	return pool[math.random(1, #pool)]
-end
+local FACE_EAST = CFrame.Angles(0, -math.pi / 2, 0)
 
-local function inBlockedZone(x: number, z: number): boolean
-	if math.abs(z) < 10 and math.abs(x) < Config.BELT_HALF_LENGTH + 6 then
-		return true
-	end
-	for _, s in ipairs(shelters) do
-		if math.abs(x - s.cx) < s.hx + 4 and math.abs(z - s.cz) < s.hz + 4 then
-			return true
+local function countCommon()
+	local n = 0
+	for model in pairs(wild) do
+		if model:GetAttribute("Rarity") == "Common" then
+			n += 1
 		end
 	end
-	return false
+	return n
 end
 
-local function randomStreetPoint(): Vector3
-	for _ = 1, 12 do
-		local angle = math.random() * math.pi * 2
-		local radius = math.sqrt(math.random()) * Config.WILD_AREA_RADIUS
-		local x, z = math.cos(angle) * radius, math.sin(angle) * radius
-		if not inBlockedZone(x, z) then
-			return Vector3.new(x, 0, z)
-		end
+local function wildCount()
+	local n = 0
+	for _ in pairs(wild) do
+		n += 1
 	end
-	return Vector3.new(0, 0, 30)
+	return n
 end
 
-function SpawnService.spawnWild(charId: string, mutation: string?, position: Vector3?)
-	local model = CharacterModel.build(charId, mutation)
-	model:SetAttribute("Wild", true)
-	local pos = position or randomStreetPoint()
-	model:PivotTo(CFrame.new(pos.X, 0, pos.Z))
-
-	local body = model:FindFirstChild("Body")
-	local prompt = Instance.new("ProximityPrompt")
-	prompt.Name = "CatchPrompt"
-	prompt.ActionText = "Catch"
-	prompt.ObjectText = model.Name
-	prompt.HoldDuration = Config.CATCH_HOLD_SECONDS
-	prompt.MaxActivationDistance = 11
-	prompt.RequiresLineOfSight = false
-	prompt.Parent = body
-	prompt.Triggered:Connect(function(player)
-		if model:GetAttribute("Taken") then
-			return
-		end
-		if SpawnService.onCatch and SpawnService.onCatch(player, model) then
-			model:SetAttribute("Taken", true)
-			SpawnService.removeWild(model)
+local function attachPrompt(model)
+	local root = model.PrimaryPart
+	local h = model:GetAttribute("Height") or 4
+	local att = Instance.new("Attachment")
+	att.Position = Vector3.new(0, h * 0.5, 0)
+	att.Parent = root
+	local pr = Instance.new("ProximityPrompt")
+	pr.Name = "Catch"
+	pr.ActionText = "Catch (hold)"
+	pr.ObjectText = model.Name
+	pr.HoldDuration = Config.CatchHold
+	pr.MaxActivationDistance = 13
+	pr.RequiresLineOfSight = false
+	pr.KeyboardKeyCode = Enum.KeyCode.E
+	pr.Parent = att
+	pr.Triggered:Connect(function(player)
+		if SpawnService.onCatch and wild[model] then
+			SpawnService.onCatch(player, model)
 		end
 	end)
+end
 
-	model.Parent = wildFolder
-	table.insert(wilds, { model = model, target = randomStreetPoint(), nextTurn = clock + 4 + math.random() * 4 })
+local function register(charId, mutation, x, z, drift, lifetime)
+	local at = CFrame.new(x, 0, z) * FACE_EAST
+	local model = CharacterModel.build(charId, mutation, at, true, 1)
+	model:SetAttribute("Wild", true)
+	model:SetAttribute("Price", 0)
+	model.Parent = folder
+	attachPrompt(model)
+	wild[model] = {
+		drift = drift,
+		expires = lifetime and (os.clock() + lifetime) or nil,
+		phase = rng:NextNumber() * 6.28,
+		x = x,
+		z = z,
+	}
 	return model
 end
 
-function SpawnService.removeWild(model: Model)
-	for i, wild in ipairs(wilds) do
-		if wild.model == model then
-			table.remove(wilds, i)
-			break
-		end
-	end
-	model:Destroy()
+local function pickCharacter(forceCommon)
+	local rIdx = forceCommon and 1 or Rarity.roll(rng)
+	local list = Characters.ByRarity[Rarity.get(rIdx).name]
+	return list[rng:NextInteger(1, #list)]
 end
 
-function SpawnService.countWilds(): number
-	return #wilds
+function SpawnService.spawnLane()
+	if wildCount() >= Config.Lane.MaxWild then
+		return
+	end
+	local L = Config.Lane
+	local def = pickCharacter(countCommon() < 2)
+	local span = L.Width / 2 - 3
+	local z = L.Z + (rng:NextNumber() * 2 - 1) * span
+	register(def.id, Mutations.roll(rng), -L.HalfLength, z, L.Speed, nil)
 end
 
-local function spawnBeltItem()
-	local rarity = Rarity.pickWeighted(nil, true)
-	local def = pickDefinition(rarity.name)
-	local mutation = Mutations.roll()
-	local model = CharacterModel.build(def.id, mutation)
-	model:ScaleTo(0.8)
-	local price = Economy.price(def.id, mutation)
-	model:SetAttribute("Price", price)
-
-	local body = model:FindFirstChild("Body")
-	local prompt = Instance.new("ProximityPrompt")
-	prompt.Name = "BuyPrompt"
-	prompt.ActionText = "Buy $" .. Economy.formatMoney(price)
-	prompt.ObjectText = model.Name .. " (" .. def.rarity .. ")"
-	prompt.HoldDuration = 0.3
-	prompt.MaxActivationDistance = 12
-	prompt.RequiresLineOfSight = false
-	prompt.Parent = body
-	prompt.Triggered:Connect(function(player)
-		SpawnService.buy(player, model)
-	end)
-
-	model:PivotTo(CFrame.new(-Config.BELT_HALF_LENGTH, 0.7, 0))
-	model.Parent = beltFolder
-	table.insert(beltItems, { model = model, x = -Config.BELT_HALF_LENGTH })
+function SpawnService.spawnDropped(charId, mutation, pos)
+	register(charId, mutation, pos.X, pos.Z, 0, 25)
 end
 
-function SpawnService.buy(player: Player, model: Model)
-	local state = PlayerState.get(player)
-	if not state or model:GetAttribute("Sold") then
-		return
+function SpawnService.remove(model)
+	if wild[model] then
+		wild[model] = nil
+		model:Destroy()
 	end
-	local charId = model:GetAttribute("CharId")
-	local mutation = model:GetAttribute("Mutation")
-	if mutation == "" then
-		mutation = nil
-	end
-	local rarity = Rarity.byName[model:GetAttribute("Rarity")]
-	if rarity.order > state.tier then
-		Notice.send(player, "Unlock the " .. rarity.name .. " tier first (bottom bar).", "bad")
-		return
-	end
-	local price = model:GetAttribute("Price")
-	if state.money < price then
-		Notice.send(player, "Not enough money.", "bad")
-		return
-	end
-	if not state.baseIndex then
-		return
-	end
-	local slotIndex = BaseService.placeCharacter(player, charId, mutation)
-	if not slotIndex then
-		Notice.send(player, "Your base is full (rebirth for a fresh start).", "bad")
-		return
-	end
-	state.money -= price
-	model:SetAttribute("Sold", true)
-	for i, item in ipairs(beltItems) do
-		if item.model == model then
-			table.remove(beltItems, i)
-			break
-		end
-	end
-	model:Destroy()
-	Notice.send(player, "Bought " .. Characters.byId[charId].name .. "!", "good")
-	PlayerState.push(player)
 end
 
-function SpawnService.init(world)
-	shelters = world.shelters
-	wildFolder = Instance.new("Folder")
-	wildFolder.Name = "Wild"
-	wildFolder.Parent = workspace
-	beltFolder = Instance.new("Folder")
-	beltFolder.Name = "Belt"
-	beltFolder.Parent = workspace
+function SpawnService.has(model)
+	return wild[model] ~= nil
+end
+
+function SpawnService.init()
+	folder = Instance.new("Folder")
+	folder.Name = "Wild"
+	folder.Parent = Workspace
+
+	-- a few characters already on the lane so the first screen is never empty
+	local L = Config.Lane
+	for i = 1, 4 do
+		local def = pickCharacter(i <= 2)
+		local x = -L.HalfLength + i * 30
+		local z = L.Z + (rng:NextNumber() * 2 - 1) * (L.Width / 2 - 3)
+		register(def.id, Mutations.roll(rng), x, z, L.Speed, nil)
+	end
 
 	RunService.Heartbeat:Connect(function(dt)
-		clock += dt
-		for _, wild in ipairs(wilds) do
-			local model = wild.model
-			local pos = model:GetPivot().Position
-			local flat = Vector3.new(wild.target.X - pos.X, 0, wild.target.Z - pos.Z)
-			if flat.Magnitude < 2 or clock > wild.nextTurn then
-				wild.target = randomStreetPoint()
-				wild.nextTurn = clock + 4 + math.random() * 4
+		sinceSpawn += dt
+		if sinceSpawn >= L.SpawnEvery then
+			sinceSpawn = 0
+			SpawnService.spawnLane()
+		end
+		local now = os.clock()
+		for model, w in pairs(wild) do
+			if not model.Parent or (w.expires and now > w.expires) or w.x > L.HalfLength then
+				wild[model] = nil
+				model:Destroy()
 			else
-				local step = flat.Unit * Config.WILD_SPEED * dt
-				local newPos = pos + step
-				local hop = math.abs(math.sin(clock * 6 + pos.X)) * 0.5
-				model:PivotTo(CFrame.lookAt(Vector3.new(newPos.X, hop, newPos.Z), Vector3.new(wild.target.X, hop, wild.target.Z)) * CFrame.Angles(0, math.pi, 0))
+				w.x += w.drift * dt
+				local bob = math.sin(now * 3 + w.phase) * 0.35
+				model:PivotTo(CFrame.new(w.x, 0.4 + bob, w.z) * FACE_EAST)
 			end
-		end
-		for i = #beltItems, 1, -1 do
-			local item = beltItems[i]
-			item.x += Config.BELT_SPEED * dt
-			if item.x > Config.BELT_HALF_LENGTH then
-				item.model:Destroy()
-				table.remove(beltItems, i)
-			else
-				item.model:PivotTo(CFrame.new(item.x, 0.7, 0))
-			end
-		end
-	end)
-
-	task.spawn(function()
-		while true do
-			-- 起動直後は街が空に見えないよう、足りない分を一気に補充する。
-			while #wilds < Config.WILD_MAX // 2 do
-				local first = Rarity.pickWeighted()
-				SpawnService.spawnWild(pickDefinition(first.name).id, Mutations.roll(), nil)
-			end
-			if #wilds < Config.WILD_MAX then
-				local rarity = Rarity.pickWeighted()
-				local def = pickDefinition(rarity.name)
-				SpawnService.spawnWild(def.id, Mutations.roll(), nil)
-			end
-			task.wait(Config.WILD_RESPAWN_SECONDS)
-		end
-	end)
-	task.spawn(function()
-		while true do
-			spawnBeltItem()
-			task.wait(Config.BELT_SPAWN_SECONDS)
 		end
 	end)
 end

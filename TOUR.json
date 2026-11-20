@@ -1,1 +1,13 @@
-{"tour": 1, "steps": [{"screenshot": "1-cover.png"}, {"screenshot": "2-catch.png"}, {"screenshot": "3-base.png"}, {"screenshot": "4-tide.png"}]}
+{
+  "tour": 1,
+  "steps": [
+    { "screenshot": "1-cover.png" },
+    { "screenshot": "2-catch.png", "keys": ["W"], "wait_ms": 2500 },
+    { "screenshot": "3-base.png", "keys": ["W"], "wait_ms": 3000 },
+    {
+      "screenshot": "4-tide.png",
+      "call": { "module": "ServerScriptService.Server.TideService", "fn": "startNow", "on": "Server" },
+      "wait_ms": 4000
+    }
+  ]
+}

@@ -1,37 +1,67 @@
--- プレイヤーごとの状態の唯一の置き場。お金・所持・台座・図鑑は全てここ（サーバー権威）。
-local Config = require(game.ReplicatedStorage.Shared.Config)
-local Economy = require(game.ReplicatedStorage.Shared.Economy)
-local Remotes = require(game.ReplicatedStorage.Shared.Remotes)
+-- The single home of per-player game state. Services mutate it; the client only ever sees snapshots.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Economy = require(Shared.Economy)
+local Rarity = require(Shared.Rarity)
 
 local PlayerState = {}
 
 local states = {}
-local stateRemote = Remotes.get("State")
+local remotes = nil
 
-function PlayerState.create(player: Player, saved)
-	saved = saved or {}
-	local state = {
-		money = saved.money or Config.START_MONEY,
-		rebirths = saved.rebirths or 0,
-		tier = saved.tier or 1,
-		boots = saved.boots or 0,
-		codex = saved.codex or {},
-		slots = saved.slots or {}, -- [台座番号] = { charId =, mutation = }
-		meters = {}, -- [台座番号] = 貯まった収益
-		carrying = nil, -- { charId =, mutation = }
-		baseIndex = nil,
-		lockUntil = 0,
-		stealCooldownUntil = 0,
-	}
-	states[player] = state
-	return state
+function PlayerState.init(r)
+	remotes = r
 end
 
-function PlayerState.get(player: Player)
+local function blank()
+	return {
+		money = 0,
+		rebirths = 0,
+		tier = 1,
+		boots = 0,
+		slots = {}, -- [1..PedestalsPerBase] = { charId, mutation, meter }
+		seen = {}, -- charId -> true (codex)
+		carrying = nil, -- { charId, mutation }
+		baseIndex = nil,
+		basePos = nil,
+		gatePos = nil,
+		lockUntil = 0,
+		stealReadyAt = 0,
+		stunUntil = 0,
+	}
+end
+
+function PlayerState.create(player, saved)
+	local st = blank()
+	if saved then
+		st.money = tonumber(saved.money) or 0
+		st.rebirths = tonumber(saved.rebirths) or 0
+		st.tier = math.clamp(tonumber(saved.tier) or 1, 1, Rarity.Count)
+		st.boots = math.clamp(tonumber(saved.boots) or 0, 0, Economy.BootsMax)
+		for id, v in pairs(saved.seen or {}) do
+			if v then
+				st.seen[id] = true
+			end
+		end
+		for _, s in ipairs(saved.slots or {}) do
+			local i = tonumber(s.slot)
+			if i and i >= 1 and i <= Config.PedestalsPerBase and s.c then
+				st.slots[i] = { charId = s.c, mutation = s.m or "None", meter = tonumber(s.t) or 0 }
+			end
+		end
+	end
+	states[player] = st
+	return st
+end
+
+function PlayerState.get(player)
 	return states[player]
 end
 
-function PlayerState.remove(player: Player)
+function PlayerState.remove(player)
 	states[player] = nil
 end
 
@@ -39,67 +69,77 @@ function PlayerState.all()
 	return states
 end
 
-function PlayerState.incomePerSecond(state): number
-	local total = 0
-	for _, slot in pairs(state.slots) do
-		total += Economy.incomePerSecond(slot.charId, slot.mutation, state.rebirths)
+function PlayerState.firstFreeSlot(st)
+	for i = 1, Config.PedestalsPerBase do
+		if not st.slots[i] then
+			return i
+		end
 	end
-	return total
+	return nil
 end
 
-function PlayerState.registerCodex(state, charId: string, mutationId: string?)
-	local entry = state.codex[charId]
-	if not entry then
-		entry = { count = 0 }
-		state.codex[charId] = entry
+function PlayerState.totalIncome(st)
+	local sum = 0
+	for i = 1, Config.PedestalsPerBase do
+		local s = st.slots[i]
+		if s then
+			sum += Economy.income(s.charId, s.mutation, st.rebirths)
+		end
 	end
-	entry.count += 1
-	if mutationId and mutationId ~= "" then
-		entry[mutationId] = true
-	end
+	return sum
 end
 
-function PlayerState.addMoney(state, amount: number)
-	state.money += amount
+function PlayerState.pending(st)
+	local sum = 0
+	for i = 1, Config.PedestalsPerBase do
+		local s = st.slots[i]
+		if s then
+			sum += s.meter
+		end
+	end
+	return sum
 end
 
--- クライアントへ見せる表示用の写し。値の変更は必ずサーバー側で行い、ここは読み取り専用。
-function PlayerState.push(player: Player)
-	local state = states[player]
-	if not state then
-		return
+function PlayerState.filledCount(st)
+	local n = 0
+	for i = 1, Config.PedestalsPerBase do
+		if st.slots[i] then
+			n += 1
+		end
 	end
-	local carryingName = nil
-	if state.carrying then
-		carryingName = state.carrying.charId
-	end
-	stateRemote:FireClient(player, {
-		money = state.money,
-		rebirths = state.rebirths,
-		tier = state.tier,
-		boots = state.boots,
-		bootsMax = Config.BOOTS_MAX_LEVEL,
-		income = PlayerState.incomePerSecond(state),
-		codex = state.codex,
-		carrying = carryingName,
-		carryingMutation = state.carrying and state.carrying.mutation or nil,
-		lockLeft = math.max(0, math.ceil(state.lockUntil - os.clock())),
-		rebirthCost = Economy.rebirthCost(state.rebirths),
-		bootsCost = state.boots < Config.BOOTS_MAX_LEVEL and Economy.bootsCost(state.boots) or nil,
-		tierCost = Economy.nextTierCost(state.tier),
-		lockCost = Config.LOCK_COST,
-	})
+	return n
 end
 
-function PlayerState.serialize(state)
+function PlayerState.snapshot(st)
+	local nextTier = st.tier < Rarity.Count and Rarity.get(st.tier + 1) or nil
 	return {
-		money = state.money,
-		rebirths = state.rebirths,
-		tier = state.tier,
-		boots = state.boots,
-		codex = state.codex,
-		slots = state.slots,
+		money = st.money,
+		rebirths = st.rebirths,
+		tier = st.tier,
+		tierName = Rarity.get(st.tier).name,
+		nextTierName = nextTier and nextTier.name or nil,
+		nextTierCost = nextTier and nextTier.tierCost or nil,
+		boots = st.boots,
+		bootsCost = st.boots < Economy.BootsMax and Economy.bootsCost(st.boots) or nil,
+		rebirthCost = Economy.rebirthCost(st.rebirths),
+		income = PlayerState.totalIncome(st),
+		pending = PlayerState.pending(st),
+		filled = PlayerState.filledCount(st),
+		carrying = st.carrying and { charId = st.carrying.charId, mutation = st.carrying.mutation } or nil,
+		baseIndex = st.baseIndex,
+		basePos = st.basePos,
+		gatePos = st.gatePos,
+		lockLeft = math.max(0, st.lockUntil - os.clock()),
+		stunLeft = math.max(0, st.stunUntil - os.clock()),
+		seen = st.seen,
 	}
+end
+
+function PlayerState.push(player)
+	local st = states[player]
+	if st and remotes then
+		remotes.State:FireClient(player, PlayerState.snapshot(st))
+	end
 end
 
 return PlayerState

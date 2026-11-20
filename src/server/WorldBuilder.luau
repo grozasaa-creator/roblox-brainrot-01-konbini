@@ -1,269 +1,452 @@
--- 夜のコンビニ街をコードで組み立てる。道・ベルト・シェルター（コンビニ）・拠点6つ・街灯・遠景ビル・夜の照明。
-local Lighting = game:GetService("Lighting")
+-- Builds every static thing in the town: lighting extras, plaza, lane, konbini, six bases and the
+-- signage that tells a new player what to do. Returns a table describing the bases for other services.
 
-local Config = require(game.ReplicatedStorage.Shared.Config)
+local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local CollectionService = game:GetService("CollectionService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Shapes = require(Shared.Shapes)
 
 local WorldBuilder = {}
 
-local BASE_COLORS = {
-	Color3.fromRGB(255, 90, 90),
-	Color3.fromRGB(90, 200, 255),
-	Color3.fromRGB(120, 255, 130),
-	Color3.fromRGB(255, 200, 70),
-	Color3.fromRGB(200, 120, 255),
-	Color3.fromRGB(255, 130, 210),
-}
+local PLASTIC = Enum.Material.SmoothPlastic
+local NEON = Enum.Material.Neon
 
-local function makePart(parent: Instance, name: string, size: Vector3, cframe: CFrame, color: Color3, material: Enum.Material?)
-	local part = Instance.new("Part")
-	part.Name = name
-	part.Anchored = true
-	part.Size = size
-	part.CFrame = cframe
-	part.Color = color
-	part.Material = material or Enum.Material.SmoothPlastic
-	part.TopSurface = Enum.SurfaceType.Smooth
-	part.BottomSurface = Enum.SurfaceType.Smooth
-	part.Parent = parent
-	return part
+local function part(parent, name, size, cf, color, material, extra)
+	local p = Instance.new("Part")
+	p.Name = name
+	p.Anchored = true
+	p.Size = size
+	p.CFrame = cf
+	p.Color = color
+	p.Material = material or PLASTIC
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	if extra then
+		for k, v in pairs(extra) do
+			p[k] = v
+		end
+	end
+	p.Parent = parent
+	return p
 end
 
--- Cylinder は X 軸が高さなので、Z 周りに 90 度回して縦向きにする。
-local function makeDisc(parent: Instance, name: string, height: number, diameter: number, position: Vector3, color: Color3, material: Enum.Material?)
-	local disc = makePart(parent, name, Vector3.new(height, diameter, diameter), CFrame.new(position) * CFrame.Angles(0, 0, math.rad(90)), color, material)
-	disc.Shape = Enum.PartType.Cylinder
-	return disc
+local function cylinder(parent, name, diameter, height, pos, color, material, extra)
+	local p = part(parent, name, Vector3.new(height, diameter, diameter), CFrame.new(pos) * CFrame.Angles(0, 0, math.rad(90)), color, material, extra)
+	p.Shape = Enum.PartType.Cylinder
+	return p
 end
 
-local function addSign(part: Part, text: string, color: Color3, face: Enum.NormalId)
+local function decoration(extra)
+	extra = extra or {}
+	extra.CanCollide = false
+	extra.CanTouch = false
+	extra.CanQuery = false
+	extra.CastShadow = false
+	return extra
+end
+
+-- text painted on one face of a part; TextScaled so it can never overflow
+local function faceText(target, face, text, textColor, bgColor)
 	local gui = Instance.new("SurfaceGui")
 	gui.Face = face
 	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
 	gui.PixelsPerStud = 40
 	gui.LightInfluence = 0
-	gui.Parent = part
+	gui.AlwaysOnTop = false
+	gui.Parent = target
 	local label = Instance.new("TextLabel")
 	label.Size = UDim2.fromScale(1, 1)
-	label.BackgroundTransparency = 1
+	label.BackgroundColor3 = bgColor or Color3.new(0, 0, 0)
+	label.BackgroundTransparency = bgColor and 0 or 1
 	label.Text = text
-	label.TextScaled = true
+	label.TextColor3 = textColor
 	label.Font = Enum.Font.GothamBlack
-	label.TextColor3 = color
+	label.TextScaled = true
+	label.TextWrapped = true
 	label.Parent = gui
+	local pad = Instance.new("UIPadding")
+	pad.PaddingTop = UDim.new(0.12, 0)
+	pad.PaddingBottom = UDim.new(0.12, 0)
+	pad.PaddingLeft = UDim.new(0.06, 0)
+	pad.PaddingRight = UDim.new(0.06, 0)
+	pad.Parent = label
+	local limit = Instance.new("UITextSizeConstraint")
+	limit.MinTextSize = 6
+	limit.MaxTextSize = 200
+	limit.Parent = label
+	return label
 end
 
-local function buildLighting()
-	Lighting.ClockTime = 20.5
-	Lighting.Brightness = 2
-	Lighting.OutdoorAmbient = Color3.fromRGB(70, 60, 110)
-	Lighting.EnvironmentDiffuseScale = 0.4
-	local atmosphere = Instance.new("Atmosphere")
-	atmosphere.Density = 0.32
-	atmosphere.Offset = 0.2
-	atmosphere.Color = Color3.fromRGB(120, 90, 190)
-	atmosphere.Decay = Color3.fromRGB(60, 30, 110)
-	atmosphere.Glare = 0.4
-	atmosphere.Haze = 1.6
-	atmosphere.Parent = Lighting
+local function billboard(parent, text, color, size, studsUp)
+	local bb = Instance.new("BillboardGui")
+	bb.Size = size or UDim2.fromOffset(220, 64)
+	bb.StudsOffset = Vector3.new(0, studsUp or 0, 0)
+	bb.AlwaysOnTop = true
+	bb.LightInfluence = 0
+	bb.MaxDistance = 400
+	bb.Parent = parent
+	local l = Instance.new("TextLabel")
+	l.Size = UDim2.fromScale(1, 1)
+	l.BackgroundColor3 = Color3.fromRGB(20, 18, 40)
+	l.BackgroundTransparency = 0.15
+	l.Text = text
+	l.TextColor3 = color
+	l.Font = Enum.Font.GothamBlack
+	l.TextScaled = true
+	l.TextWrapped = true
+	l.Parent = bb
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0.25, 0)
+	corner.Parent = l
+	local pad = Instance.new("UIPadding")
+	pad.PaddingTop = UDim.new(0.14, 0)
+	pad.PaddingBottom = UDim.new(0.14, 0)
+	pad.PaddingLeft = UDim.new(0.08, 0)
+	pad.PaddingRight = UDim.new(0.08, 0)
+	pad.Parent = l
+	local limit = Instance.new("UITextSizeConstraint")
+	limit.MinTextSize = 8
+	limit.MaxTextSize = 40
+	limit.Parent = l
+	return bb, l
+end
+
+local function lamp(parent, pos, warm)
+	local pole = cylinder(parent, "LampPole", 0.7, 11, pos + Vector3.new(0, 5.5, 0), Color3.fromRGB(95, 90, 125), PLASTIC)
+	pole.CFrame = CFrame.new(pos + Vector3.new(0, 5.5, 0)) * CFrame.Angles(0, 0, math.rad(90))
+	local bulb = part(parent, "LampBulb", Vector3.new(2.4, 2.4, 2.4), CFrame.new(pos + Vector3.new(0, 11.8, 0)), warm, NEON, decoration())
+	bulb.Shape = Enum.PartType.Ball
+	local light = Instance.new("PointLight")
+	light.Color = warm
+	light.Range = 46
+	light.Brightness = 2.2
+	light.Shadows = false
+	light.Parent = bulb
+end
+
+local function baseHue(i)
+	return Color3.fromHSV(((i - 1) / Config.BaseCount + 0.02) % 1, 0.55, 1)
+end
+
+local function setupLighting()
+	Lighting.ClockTime = 19
+	Lighting.Brightness = 3.5
+	Lighting.Ambient = Color3.fromRGB(140, 130, 190)
+	Lighting.OutdoorAmbient = Color3.fromRGB(165, 155, 215)
+	Lighting.ExposureCompensation = 0.9
+	Lighting.EnvironmentDiffuseScale = 0.6
+	Lighting.EnvironmentSpecularScale = 0.4
+	Lighting.ColorShift_Top = Color3.fromRGB(255, 210, 240)
+	Lighting.FogEnd = 100000
+
+	for _, cls in ipairs({ "Sky", "Atmosphere", "BloomEffect", "ColorCorrectionEffect", "SunRaysEffect" }) do
+		local old = Lighting:FindFirstChildOfClass(cls)
+		if old then
+			old.Parent = nil
+		end
+	end
+
+	local sky = Instance.new("Sky")
+	sky.StarCount = 3000
+	sky.CelestialBodiesShown = true
+	sky.Parent = Lighting
+
+	local atmo = Instance.new("Atmosphere")
+	atmo.Density = 0.22
+	atmo.Offset = 0.2
+	atmo.Color = Color3.fromRGB(190, 170, 235)
+	atmo.Decay = Color3.fromRGB(255, 170, 215)
+	atmo.Glare = 0.2
+	atmo.Haze = 0.6
+	atmo.Parent = Lighting
+
 	local bloom = Instance.new("BloomEffect")
-	bloom.Intensity = 0.9
-	bloom.Size = 36
+	bloom.Intensity = 0.55
+	bloom.Size = 28
 	bloom.Threshold = 1.1
 	bloom.Parent = Lighting
-	local correction = Instance.new("ColorCorrectionEffect")
-	correction.Name = "WarnTint"
-	correction.Saturation = 0.15
-	correction.Contrast = 0.1
-	correction.Parent = Lighting
+
+	local cc = Instance.new("ColorCorrectionEffect")
+	cc.Brightness = 0.04
+	cc.Contrast = 0.08
+	cc.Saturation = 0.2
+	cc.Parent = Lighting
 end
 
-local function buildRoads(town: Folder)
-	local roadColor = Color3.fromRGB(34, 34, 44)
-	makePart(town, "RoadX", Vector3.new(600, 0.2, 24), CFrame.new(0, 0.1, 0), roadColor, Enum.Material.Asphalt)
-	makePart(town, "RoadZ", Vector3.new(24, 0.2, 600), CFrame.new(0, 0.11, 0), roadColor, Enum.Material.Asphalt)
-	for x = -280, 280, 20 do
-		makePart(town, "Dash", Vector3.new(8, 0.05, 0.6), CFrame.new(x, 0.25, 9), Color3.fromRGB(255, 230, 120), Enum.Material.Neon)
-		makePart(town, "Dash", Vector3.new(8, 0.05, 0.6), CFrame.new(x, 0.25, -9), Color3.fromRGB(255, 230, 120), Enum.Material.Neon)
+-- ground colour is set by the project file's Ground part; recolour here too so scripts and file agree
+local function paintGround()
+	local g = Workspace:FindFirstChild("Ground")
+	if g then
+		g.Color = Color3.fromRGB(104, 100, 150)
+		g.Material = PLASTIC
 	end
 end
 
-local function buildBelt(town: Folder)
-	local half = Config.BELT_HALF_LENGTH
-	makePart(town, "BeltSurface", Vector3.new(half * 2, 0.6, 8), CFrame.new(0, 0.4, 0), Color3.fromRGB(25, 25, 30), Enum.Material.Metal)
-	for _, z in ipairs({ -4.4, 4.4 }) do
-		makePart(town, "BeltRail", Vector3.new(half * 2, 0.5, 0.5), CFrame.new(0, 0.9, z), Color3.fromRGB(80, 255, 255), Enum.Material.Neon)
+local function buildPlaza(root)
+	cylinder(root, "Plaza", 104, 0.3, Vector3.new(0, 0.15, 0), Color3.fromRGB(178, 170, 222), PLASTIC)
+	cylinder(root, "PlazaRim", 108, 0.2, Vector3.new(0, 0.1, 0), Color3.fromRGB(255, 190, 235), NEON, decoration())
+
+	-- the drifting lane
+	local L = Config.Lane
+	part(root, "Lane", Vector3.new(L.HalfLength * 2 + 8, 0.3, L.Width), CFrame.new(0, 0.2, L.Z), Color3.fromRGB(150, 146, 192), PLASTIC, decoration())
+	for _, dz in ipairs({ -L.Width / 2, L.Width / 2 }) do
+		part(root, "LaneEdge", Vector3.new(L.HalfLength * 2 + 8, 0.2, 0.7), CFrame.new(0, 0.34, L.Z + dz), Color3.fromRGB(80, 255, 240), NEON, decoration())
 	end
-	local title = makePart(town, "BeltTitle", Vector3.new(26, 4, 0.6), CFrame.new(0, 14, -10), Color3.fromRGB(20, 20, 30))
-	addSign(title, "SUSHI-BELT  BUY A BRAINROT", Color3.fromRGB(80, 255, 255), Enum.NormalId.Front)
-	makePart(town, "BeltTitlePostA", Vector3.new(0.8, 14, 0.8), CFrame.new(-12, 7, -10), Color3.fromRGB(60, 60, 70), Enum.Material.Metal)
-	makePart(town, "BeltTitlePostB", Vector3.new(0.8, 14, 0.8), CFrame.new(12, 7, -10), Color3.fromRGB(60, 60, 70), Enum.Material.Metal)
-end
-
--- コンビニ型シェルター。高波の間はここも安全地帯になる。返り値は XZ の矩形リスト。
-local function buildShelters(town: Folder)
-	local shelters = {}
-	local names = { "NIGHT MART", "OPEN 24H", "ONIGIRI", "RAMEN BAR" }
-	local colors = { Color3.fromRGB(80, 255, 160), Color3.fromRGB(255, 90, 120), Color3.fromRGB(255, 210, 70), Color3.fromRGB(110, 170, 255) }
-	local spots = { Vector3.new(-85, 0, 55), Vector3.new(85, 0, 55), Vector3.new(-85, 0, -55), Vector3.new(85, 0, -55) }
-	for i, spot in ipairs(spots) do
-		local folder = Instance.new("Folder")
-		folder.Name = "Konbini" .. i
-		folder.Parent = town
-		local facing = spot.Z > 0 and -1 or 1 -- 開口は中央（ベルト）側
-		local w, h, d = 30, 14, 24
-		makePart(folder, "Floor", Vector3.new(w, 0.5, d), CFrame.new(spot.X, 0.25, spot.Z), Color3.fromRGB(225, 225, 235))
-		makePart(folder, "BackWall", Vector3.new(w, h, 1), CFrame.new(spot.X, h / 2, spot.Z - facing * d / 2), Color3.fromRGB(235, 240, 250))
-		makePart(folder, "WallL", Vector3.new(1, h, d), CFrame.new(spot.X - w / 2, h / 2, spot.Z), Color3.fromRGB(235, 240, 250))
-		makePart(folder, "WallR", Vector3.new(1, h, d), CFrame.new(spot.X + w / 2, h / 2, spot.Z), Color3.fromRGB(235, 240, 250))
-		makePart(folder, "Roof", Vector3.new(w + 2, 1, d + 2), CFrame.new(spot.X, h + 0.5, spot.Z), colors[i])
-		local sign = makePart(folder, "Sign", Vector3.new(w - 4, 4, 0.6), CFrame.new(spot.X, h + 3.5, spot.Z + facing * (d / 2 + 0.5)), Color3.fromRGB(15, 15, 25))
-		addSign(sign, names[i], colors[i], facing == -1 and Enum.NormalId.Front or Enum.NormalId.Back)
-		for s = -1, 1 do
-			makePart(folder, "Shelf", Vector3.new(6, 6, 2), CFrame.new(spot.X + s * 9, 3, spot.Z - facing * 8), Color3.fromRGB(255, 255, 255)).Material = Enum.Material.Metal
-			makePart(folder, "Goods", Vector3.new(5, 0.8, 1.6), CFrame.new(spot.X + s * 9, 4, spot.Z - facing * 7.6), colors[(i + s) % 4 + 1], Enum.Material.Neon)
-		end
-		local light = Instance.new("PointLight")
-		light.Range = 36
-		light.Brightness = 2
-		light.Color = colors[i]
-		light.Parent = folder:FindFirstChild("Roof")
-		table.insert(shelters, { cx = spot.X, cz = spot.Z, hx = w / 2, hz = d / 2 })
-	end
-	return shelters
-end
-
-local function buildBases(town: Folder)
-	local bases = {}
-	for i = 1, Config.BASE_COUNT do
-		local angle = math.rad((i - 1) * (360 / Config.BASE_COUNT))
-		local center = Vector3.new(math.cos(angle) * Config.BASE_RING_RADIUS, 0, math.sin(angle) * Config.BASE_RING_RADIUS)
-		local inward = (-center).Unit
-		local color = BASE_COLORS[i]
-
-		local folder = Instance.new("Folder")
-		folder.Name = "Base" .. i
-		folder.Parent = town
-
-		makeDisc(folder, "FloorGlow", 0.3, Config.BASE_RADIUS * 2 + 3, center + Vector3.new(0, 0.2, 0), color, Enum.Material.Neon)
-		makeDisc(folder, "Floor", 0.5, Config.BASE_RADIUS * 2, center + Vector3.new(0, 0.5, 0), Color3.fromRGB(38, 32, 56), Enum.Material.Slate)
-
-		local pedestals = {}
-		for j = 1, Config.PEDESTALS_PER_BASE do
-			local a = math.rad((j - 1) * (360 / Config.PEDESTALS_PER_BASE) + 22.5)
-			local pos = center + Vector3.new(math.cos(a) * Config.PEDESTAL_RING_RADIUS, 1.1, math.sin(a) * Config.PEDESTAL_RING_RADIUS)
-			local pedestal = makeDisc(folder, "Pedestal" .. j, 1.2, 7, pos, Color3.fromRGB(60, 55, 80), Enum.Material.Metal)
-			local glow = makeDisc(folder, "PedestalGlow" .. j, 0.15, 7.6, pos + Vector3.new(0, 0.62, 0), color, Enum.Material.Neon)
-			glow.CanCollide = false
-			pedestal:SetAttribute("BaseIndex", i)
-			pedestal:SetAttribute("PedestalIndex", j)
-			pedestal:SetAttribute("Meter", 0)
-			pedestal:AddTag("Pedestal")
-			local prompt = Instance.new("ProximityPrompt")
-			prompt.Name = "CollectPrompt"
-			prompt.ActionText = "Collect"
-			prompt.ObjectText = "Pedestal " .. j
-			prompt.HoldDuration = 0
-			prompt.MaxActivationDistance = 11
-			prompt.RequiresLineOfSight = false
-			prompt.Parent = pedestal
-			pedestals[j] = pedestal
-		end
-
-		-- 門（ロックの操作盤）。中央側の縁に立てる。
-		local gatePos = center + inward * (Config.BASE_RADIUS - 2)
-		local gateCF = CFrame.lookAt(gatePos + Vector3.new(0, 7, 0), gatePos + Vector3.new(0, 7, 0) + inward)
-		local gate = makePart(folder, "Gate", Vector3.new(16, 3, 1), gateCF, color, Enum.Material.Neon)
-		for _, side in ipairs({ -1, 1 }) do
-			local postPos = gatePos + gateCF.RightVector * (side * 8)
-			makePart(folder, "GatePost", Vector3.new(1.2, 14, 1.2), CFrame.new(postPos.X, 7, postPos.Z), Color3.fromRGB(50, 50, 64), Enum.Material.Metal)
-		end
-		local lockPrompt = Instance.new("ProximityPrompt")
-		lockPrompt.Name = "LockPrompt"
-		lockPrompt.ActionText = "Lock base"
-		lockPrompt.ObjectText = "$" .. Config.LOCK_COST .. " / " .. Config.LOCK_SECONDS .. "s"
-		lockPrompt.HoldDuration = 0.4
-		lockPrompt.MaxActivationDistance = 16
-		lockPrompt.RequiresLineOfSight = false
-		lockPrompt.Parent = gate
-		gate:SetAttribute("BaseIndex", i)
-		gate:AddTag("BaseGate")
-
-		local spawn = Instance.new("SpawnLocation")
-		spawn.Name = "Spawn"
-		spawn.Anchored = true
-		spawn.Neutral = true
-		spawn.Enabled = true
-		spawn.Size = Vector3.new(8, 0.4, 8)
-		spawn.Position = center + inward * 8 + Vector3.new(0, 1, 0)
-		spawn.Color = color
-		spawn.Material = Enum.Material.Neon
-		spawn.Transparency = 0.5
-		spawn.CanCollide = false
-		spawn.Parent = folder
-
-		bases[i] = {
-			index = i,
-			center = center,
-			folder = folder,
-			pedestals = pedestals,
-			gate = gate,
-			spawn = spawn,
-			color = color,
-			owner = nil,
-		}
-	end
-	return bases
-end
-
-local function buildLamps(town: Folder)
-	for i = 1, 20 do
-		local a = math.rad(i * 18)
-		local r = i % 2 == 0 and 62 or 112
-		local pos = Vector3.new(math.cos(a) * r, 0, math.sin(a) * r)
-		makePart(town, "LampPole", Vector3.new(0.6, 12, 0.6), CFrame.new(pos.X, 6, pos.Z), Color3.fromRGB(70, 70, 80), Enum.Material.Metal)
-		local head = makePart(town, "LampHead", Vector3.new(2, 1, 2), CFrame.new(pos.X, 12.5, pos.Z), Color3.fromRGB(255, 220, 150), Enum.Material.Neon)
-		local light = Instance.new("PointLight")
-		light.Range = 30
-		light.Brightness = 1.6
-		light.Color = Color3.fromRGB(255, 210, 150)
-		light.Parent = head
+	-- chevrons on the road show which way things drift
+	for x = -L.HalfLength + 8, L.HalfLength - 8, 16 do
+		Shapes.chevron(root, CFrame.lookAt(Vector3.new(x, 0.5, L.Z), Vector3.new(x + 1, 0.5, L.Z)), 4.5, 0.9, Color3.fromRGB(255, 240, 120), NEON, 0.1)
 	end
 end
 
-local function buildSkyline(town: Folder)
-	local rng = Random.new(7)
+local function buildKonbini(root)
+	local K = Config.Konbini
+	local c = K.Center
+	local folder = Instance.new("Folder")
+	folder.Name = "Konbini"
+	folder.Parent = root
+
+	part(folder, "Shell", Vector3.new(K.HalfX * 2, 14, K.HalfZ * 2), CFrame.new(c.X, 7, c.Z), Color3.fromRGB(245, 245, 252), PLASTIC)
+	part(folder, "RoofStripe", Vector3.new(K.HalfX * 2 + 0.6, 1.6, K.HalfZ * 2 + 0.6), CFrame.new(c.X, 14.4, c.Z), Color3.fromRGB(40, 190, 120), PLASTIC)
+	part(folder, "RoofStripe2", Vector3.new(K.HalfX * 2 + 0.7, 0.7, K.HalfZ * 2 + 0.7), CFrame.new(c.X, 13.2, c.Z), Color3.fromRGB(60, 120, 255), PLASTIC)
+
+	local frontZ = c.Z + K.HalfZ
+	part(folder, "Window", Vector3.new(K.HalfX * 2 - 10, 7, 0.4), CFrame.new(c.X, 6.2, frontZ + 0.1), Color3.fromRGB(190, 235, 255), NEON, decoration({ Transparency = 0.35 }))
+	local sign = part(folder, "Sign", Vector3.new(46, 7.5, 1.4), CFrame.new(c.X, 20, frontZ - 1), Color3.fromRGB(25, 20, 55), PLASTIC)
+	faceText(sign, Enum.NormalId.Back, "KONBINI", Color3.fromRGB(255, 245, 120), nil)
+	part(folder, "SignGlow", Vector3.new(47, 0.6, 1.6), CFrame.new(c.X, 16, frontZ - 1), Color3.fromRGB(255, 90, 200), NEON, decoration())
+
+	-- vending machines along the front
+	local cols = { Color3.fromRGB(255, 95, 95), Color3.fromRGB(95, 200, 255), Color3.fromRGB(255, 215, 85) }
+	for i = 1, 6 do
+		local x = -24 + (i - 1) * 9.6
+		part(folder, "Vending", Vector3.new(4, 7, 3), CFrame.new(x, 3.5, frontZ + 2.2), cols[(i - 1) % 3 + 1], PLASTIC)
+		part(folder, "VendingGlass", Vector3.new(3, 4, 0.3), CFrame.new(x, 4.2, frontZ + 3.7), Color3.fromRGB(255, 255, 255), NEON, decoration())
+	end
+
+	-- spawn pad: the player starts here
+	local pad = Instance.new("SpawnLocation")
+	pad.Name = "SpawnPad"
+	pad.Anchored = true
+	pad.Size = Vector3.new(14, 1, 14)
+	pad.CFrame = CFrame.new(K.SpawnPad)
+	pad.Color = Color3.fromRGB(80, 255, 170)
+	pad.Material = NEON
+	pad.Neutral = true
+	pad.Duration = 0
+	pad.TopSurface = Enum.SurfaceType.Smooth
+	pad.Parent = folder
+	billboard(pad, "START HERE", Color3.fromRGB(255, 245, 120), UDim2.fromOffset(240, 60), 8)
+
+	-- arrow trail from the pad down onto the lane
+	for z = K.SpawnPad.Z + 9, 0, 6 do
+		Shapes.chevron(folder, CFrame.lookAt(Vector3.new(0, 0.6, z), Vector3.new(0, 0.6, z + 1)), 5, 1.1, Color3.fromRGB(255, 240, 80), NEON, 0)
+	end
+	return folder
+end
+
+-- a downward neon arrow hovering over the lane's centre
+local function buildLaneMarker(root)
+	local L = Config.Lane
+	local folder = Instance.new("Folder")
+	folder.Name = "LaneMarker"
+	folder.Parent = root
+	local top = Vector3.new(0, 26, L.Z)
+	for i = 0, 2 do
+		local y = 26 - i * 4
+		Shapes.chevron(folder, CFrame.lookAt(Vector3.new(0, y, L.Z), Vector3.new(0, y - 1, L.Z), Vector3.new(0, 0, 1)), 6, 1.2, Color3.fromRGB(255, 240, 80), NEON, i * 0.2)
+	end
+	local anchor = part(folder, "MarkerAnchor", Vector3.new(1, 1, 1), CFrame.new(top + Vector3.new(0, 7, 0)), Color3.new(1, 1, 1), PLASTIC, decoration({ Transparency = 1 }))
+	billboard(anchor, "CATCH HERE", Color3.fromRGB(255, 245, 120), UDim2.fromOffset(240, 60), 0)
+end
+
+-- four-sided pillar in the plaza that spells out the loop with big numbers
+local function buildStepPillar(root)
+	local pos = Vector3.new(0, 0, 34)
+	local pillar = part(root, "StepPillar", Vector3.new(9, 16, 9), CFrame.new(pos + Vector3.new(0, 8, 0)), Color3.fromRGB(35, 30, 75), PLASTIC)
+	local steps = {
+		{ "1  CATCH", Color3.fromRGB(255, 240, 120) },
+		{ "2  RUN HOME", Color3.fromRGB(120, 255, 190) },
+		{ "3  COLLECT $", Color3.fromRGB(255, 200, 90) },
+		{ "4  UPGRADE", Color3.fromRGB(255, 130, 230) },
+	}
+	local faces = { Enum.NormalId.Front, Enum.NormalId.Right, Enum.NormalId.Back, Enum.NormalId.Left }
+	for i, f in ipairs(faces) do
+		faceText(pillar, f, steps[i][1], steps[i][2], nil)
+	end
+	part(root, "StepPillarCap", Vector3.new(10, 1, 10), CFrame.new(pos + Vector3.new(0, 16.5, 0)), Color3.fromRGB(255, 130, 230), NEON, decoration())
+	local light = Instance.new("PointLight")
+	light.Range = 30
+	light.Brightness = 1.6
+	light.Color = Color3.fromRGB(255, 220, 255)
+	light.Parent = pillar
+end
+
+local function buildLamps(root)
+	local warm = Color3.fromRGB(255, 225, 150)
+	for i = 0, 11 do
+		local a = i / 12 * math.pi * 2 + 0.26
+		lamp(root, Vector3.new(math.cos(a) * 54, 0, math.sin(a) * 54), warm)
+	end
+	-- a couple of extra lamps lighting the konbini front
+	lamp(root, Vector3.new(-40, 0, -30), warm)
+	lamp(root, Vector3.new(40, 0, -30), warm)
+end
+
+local function buildSkyline(root)
+	local rng = Random.new(77)
+	local folder = Instance.new("Folder")
+	folder.Name = "Skyline"
+	folder.Parent = root
 	for i = 1, 36 do
-		local a = math.rad(i * 10)
-		local r = 330
-		local h = rng:NextInteger(40, 120)
-		local width = rng:NextInteger(18, 34)
-		local cf = CFrame.new(math.cos(a) * r, h / 2, math.sin(a) * r) * CFrame.Angles(0, -a, 0)
-		local building = makePart(town, "Skyline", Vector3.new(width, h, width), cf, Color3.fromRGB(26, 24, 40))
-		building.CanCollide = false
-		local strip = makePart(town, "SkylineNeon", Vector3.new(width + 0.4, 1.2, width + 0.4), cf * CFrame.new(0, h / 2 - 3 - rng:NextInteger(0, 20), 0), BASE_COLORS[i % 6 + 1], Enum.Material.Neon)
-		strip.CanCollide = false
+		local a = (i / 36) * math.pi * 2
+		local r = 300 + rng:NextNumber() * 55
+		local h = 22 + rng:NextNumber() * 48
+		local w = 16 + rng:NextNumber() * 18
+		local hue = rng:NextNumber()
+		local pos = Vector3.new(math.cos(a) * r, h / 2, math.sin(a) * r)
+		local b = part(folder, "Tower", Vector3.new(w, h, w), CFrame.new(pos) * CFrame.Angles(0, a, 0), Color3.fromHSV(hue, 0.25, 0.7), PLASTIC)
+		for f = 1, 3 do
+			part(folder, "Window", Vector3.new(w + 0.2, 1.2, w + 0.2), CFrame.new(pos.X, f * h / 4, pos.Z) * CFrame.Angles(0, a, 0), Color3.fromHSV(hue, 0.6, 1), NEON, decoration())
+		end
+		b.CanCollide = true
 	end
 end
 
--- 返り値: bases（拠点）, shelters（安全地帯の矩形）, patrolPoints（警備ロボの巡回路）
-function WorldBuilder.build()
-	buildLighting()
-	local town = Instance.new("Folder")
-	town.Name = "Town"
-	town.Parent = workspace
-	buildRoads(town)
-	buildBelt(town)
-	local shelters = buildShelters(town)
-	local bases = buildBases(town)
-	buildLamps(town)
-	buildSkyline(town)
+local function buildBase(root, i)
+	local a = math.rad(30 + 60 * (i - 1))
+	local center = Vector3.new(math.cos(a) * Config.BaseRingRadius, 0, math.sin(a) * Config.BaseRingRadius)
+	local dirIn = (-center).Unit
+	local gate = center + dirIn * Config.BaseRadius
+	local hue = baseHue(i)
 
-	local patrolPoints = {}
-	for i = 1, 8 do
-		local a = math.rad(i * 45 + 22.5)
-		patrolPoints[i] = Vector3.new(math.cos(a) * Config.PATROL_RADIUS, 0, math.sin(a) * Config.PATROL_RADIUS)
+	local folder = Instance.new("Folder")
+	folder.Name = "Base" .. i
+	folder.Parent = root
+
+	cylinder(folder, "Floor", Config.BaseRadius * 2, 0.8, Vector3.new(center.X, 0.4, center.Z), hue:Lerp(Color3.new(1, 1, 1), 0.55), PLASTIC)
+	local ring = cylinder(folder, "SafeRing", Config.BaseRadius * 2 + 1.5, 0.3, Vector3.new(center.X, 0.75, center.Z), hue, NEON, decoration())
+	local inner = cylinder(folder, "SafeInner", Config.BaseRadius * 2 - 2.5, 0.35, Vector3.new(center.X, 0.78, center.Z), hue:Lerp(Color3.new(1, 1, 1), 0.55), PLASTIC, decoration())
+	inner.Transparency = 0
+
+	-- tall beacon so a base can be spotted from anywhere
+	local beacon = cylinder(folder, "Beacon", 3, 130, Vector3.new(center.X, 65, center.Z), hue, NEON, decoration({ Transparency = 0.55 }))
+	beacon.CFrame = CFrame.new(center.X, 65, center.Z) * CFrame.Angles(0, 0, math.rad(90))
+
+	-- collect pad in the middle
+	local padPart = cylinder(folder, "CollectPad", 9, 0.5, Vector3.new(center.X, 1.05, center.Z), Color3.fromRGB(255, 215, 70), NEON, { CanCollide = false })
+	padPart:SetAttribute("BaseIndex", i)
+	CollectionService:AddTag(padPart, "CollectPad")
+	billboard(padPart, "$ COLLECT", Color3.fromRGB(255, 235, 120), UDim2.fromOffset(200, 54), 5)
+
+	-- pedestals
+	local pedestals = {}
+	for s = 1, Config.PedestalsPerBase do
+		local pa = (s - 1) / Config.PedestalsPerBase * math.pi * 2
+		local pp = Vector3.new(center.X + math.cos(pa) * Config.PedestalRingRadius, 0, center.Z + math.sin(pa) * Config.PedestalRingRadius)
+		local frame = cylinder(folder, "Frame" .. s, 7.4, 0.3, pp + Vector3.new(0, 0.95, 0), Color3.fromRGB(90, 255, 235), NEON, decoration())
+		local ped = cylinder(folder, "Pedestal" .. s, 5, 1.6, pp + Vector3.new(0, 1.6, 0), Color3.fromRGB(240, 238, 255), PLASTIC)
+		ped:SetAttribute("BaseIndex", i)
+		ped:SetAttribute("Slot", s)
+		ped:SetAttribute("OwnerUserId", 0)
+		ped:SetAttribute("Filled", false)
+		ped:SetAttribute("Meter", 0)
+		CollectionService:AddTag(ped, "Pedestal")
+		local att = Instance.new("Attachment")
+		att.Name = "PromptAnchor"
+		att.Position = Vector3.new(0, 1.5, 0)
+		att.Parent = ped
+		local function prompt(name, action, hold)
+			local pr = Instance.new("ProximityPrompt")
+			pr.Name = name
+			pr.ActionText = action
+			pr.ObjectText = "Pedestal " .. s
+			pr.HoldDuration = hold
+			pr.MaxActivationDistance = 11
+			pr.RequiresLineOfSight = false
+			pr.KeyboardKeyCode = Enum.KeyCode.E
+			pr.Enabled = false -- the client opens the one that applies
+			pr.Parent = att
+			return pr
+		end
+		prompt("Place", "Place brainrot", Config.PlaceHold)
+		prompt("Collect", "Collect $", Config.CollectHold)
+		prompt("Steal", "STEAL!", Config.StealHold)
+		pedestals[s] = { part = ped, frame = frame, pos = pp }
 	end
-	return { town = town, bases = bases, shelters = shelters, patrolPoints = patrolPoints }
+
+	-- gate: posts, sign, glowing path out to the plaza
+	local right = dirIn:Cross(Vector3.new(0, 1, 0)).Unit
+	for _, side in ipairs({ -1, 1 }) do
+		part(folder, "GatePost", Vector3.new(1.6, 12, 1.6), CFrame.new(gate + right * side * 8 + Vector3.new(0, 6, 0)), hue, NEON, decoration())
+	end
+	local signCF = CFrame.lookAt(gate + Vector3.new(0, 12.5, 0), gate + Vector3.new(0, 12.5, 0) + dirIn)
+	local signPart = part(folder, "GateSign", Vector3.new(17, 4.4, 0.8), signCF, Color3.fromRGB(25, 20, 55), PLASTIC, decoration())
+	local signFront = faceText(signPart, Enum.NormalId.Front, "FREE BASE", hue, nil)
+	local signBack = faceText(signPart, Enum.NormalId.Back, "FREE BASE", hue, nil)
+	part(folder, "GateBar", Vector3.new(18, 0.6, 1), signCF * CFrame.new(0, 2.6, 0), hue, NEON, decoration())
+
+	local pathLen = (gate - Vector3.new(0, 0, 0)).Magnitude - 52
+	local steps = math.floor(pathLen / 9)
+	for n = 1, steps do
+		local at = gate + dirIn * (n * 9 - 4)
+		-- chevrons point from the plaza toward the base
+		Shapes.chevron(folder, CFrame.lookAt(Vector3.new(at.X, 0.5, at.Z), Vector3.new(at.X, 0.5, at.Z) - dirIn), 4.5, 0.9, hue, NEON, 0)
+	end
+
+	return {
+		index = i,
+		center = center,
+		gate = gate,
+		hue = hue,
+		folder = folder,
+		ring = ring,
+		pedestals = pedestals,
+		collectPad = padPart,
+		signLabels = { signFront, signBack },
+		owner = nil,
+		models = {},
+	}
+end
+
+function WorldBuilder.build()
+	setupLighting()
+	paintGround()
+
+	local root = Instance.new("Folder")
+	root.Name = "World"
+	root.Parent = Workspace
+
+	buildPlaza(root)
+	buildKonbini(root)
+	buildLaneMarker(root)
+	buildStepPillar(root)
+	buildLamps(root)
+	buildSkyline(root)
+
+	local bases = {}
+	for i = 1, Config.BaseCount do
+		bases[i] = buildBase(root, i)
+	end
+	return { root = root, bases = bases }
+end
+
+-- true when a world position is inside a base disc or the konbini block (the tide and robots skip these)
+function WorldBuilder.isSafe(world, pos)
+	for _, b in ipairs(world.bases) do
+		local dx, dz = pos.X - b.center.X, pos.Z - b.center.Z
+		if dx * dx + dz * dz <= (Config.BaseRadius + 2) ^ 2 then
+			return true
+		end
+	end
+	local K = Config.Konbini
+	if math.abs(pos.X - K.Center.X) <= K.HalfX + 4 and pos.Z >= K.Center.Z - K.HalfZ - 4 and pos.Z <= K.SpawnPad.Z + 10 then
+		return true
+	end
+	return false
 end
 
 return WorldBuilder

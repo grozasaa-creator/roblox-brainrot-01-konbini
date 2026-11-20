@@ -1,16 +1,32 @@
--- クライアントの起動点。表示と入力だけを担当し、お金や所持の判断は全てサーバーに任せる。
-local Players = game:GetService("Players")
+-- Client entry: connects the server's state feed to the HUD and starts the guidance and feedback layers.
 
-local HudController = require(script.Parent.HudController)
-local LabelBillboard = require(script.Parent.LabelBillboard)
-local CarryInput = require(script.Parent.CarryInput)
-local Effects = require(script.Parent.Effects)
-local CodexUi = require(script.Parent.CodexUi)
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Remotes = require(Shared.Remotes)
 
-local hud = HudController.create(playerGui)
-CodexUi.create(playerGui, hud)
+local Client = script.Parent
+local ClientState = require(Client.ClientState)
+local HudController = require(Client.HudController)
+local CodexUi = require(Client.CodexUi)
+local Guide = require(Client.Guide)
+local LabelBillboard = require(Client.LabelBillboard)
+local PromptGate = require(Client.PromptGate)
+local CarryInput = require(Client.CarryInput)
+local Effects = require(Client.Effects)
+
+local remotes = Remotes.client()
+
+local function sendAction(name)
+	remotes.Action:FireServer(name)
+end
+
+remotes.State.OnClientEvent:Connect(ClientState.setSnapshot)
+
+CodexUi.start()
+HudController.start(sendAction, CodexUi.toggle)
+Effects.start(remotes)
 LabelBillboard.start()
-CarryInput.start(hud)
-Effects.start(hud)
+PromptGate.start()
+CarryInput.start(sendAction, CodexUi.toggle)
+Guide.start()

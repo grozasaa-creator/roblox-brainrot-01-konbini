@@ -1,185 +1,256 @@
--- 画面上の表示。お金・毎秒収益・操作ボタン・お知らせ・高波の警告帯。左上は Roblox のメニューがあるので避ける。
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
+-- The always-on HUD: objective banner, four-step tracker, wallet, carry panel and the upgrade buttons.
+-- Everything is built through UiKit so text can never spill out of its frame.
 
-local Economy = require(ReplicatedStorage.Shared.Economy)
-local Rarity = require(ReplicatedStorage.Shared.Rarity)
-local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Economy = require(Shared.Economy)
+local Rarity = require(Shared.Rarity)
+local Characters = require(Shared.Characters)
+local Config = require(Shared.Config)
+
+local UiKit = require(script.Parent.UiKit)
+local ClientState = require(script.Parent.ClientState)
+
+local C = UiKit.Colors
 
 local HudController = {}
 
-local NOTICE_COLORS = {
-	info = Color3.fromRGB(255, 255, 255),
-	good = Color3.fromRGB(120, 255, 150),
-	bad = Color3.fromRGB(255, 110, 110),
-	warn = Color3.fromRGB(255, 220, 80),
+local STEPS = {
+	{ "1", "CATCH", Color3.fromRGB(255, 226, 90) },
+	{ "2", "RUN HOME", Color3.fromRGB(110, 255, 200) },
+	{ "3", "COLLECT $", Color3.fromRGB(255, 190, 80) },
+	{ "4", "UPGRADE", Color3.fromRGB(255, 120, 225) },
 }
 
-local function makeLabel(parent: Instance, name: string, size: UDim2, position: UDim2, textSize: number): TextLabel
-	local label = Instance.new("TextLabel")
-	label.Name = name
-	label.Size = size
-	label.Position = position
-	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.GothamBlack
-	label.TextSize = textSize
-	label.TextColor3 = Color3.new(1, 1, 1)
-	label.TextStrokeTransparency = 0.3
-	label.Parent = parent
-	return label
+local ui = {}
+local sendAction = nil
+local openCodex = nil
+
+local function twoLineButton(parent, x, title, onClick)
+	local b = UiKit.button(parent, "", {
+		Position = UDim2.fromScale(x, 0),
+		Size = UDim2.fromScale(0.235, 1),
+		BackgroundColor3 = C.PanelLight,
+	})
+	b.Text = ""
+	local top = UiKit.label(b, title, { Position = UDim2.fromScale(0, 0.02), Size = UDim2.fromScale(1, 0.5), Font = Enum.Font.GothamBlack }, { MaxText = 24, pad = 0.06 })
+	local bottom = UiKit.label(b, "", { Position = UDim2.fromScale(0, 0.5), Size = UDim2.fromScale(1, 0.46), TextColor3 = C.Gold }, { MaxText = 20, pad = 0.06 })
+	local stroke = UiKit.stroke(b, C.Dim, 2)
+	b.Activated:Connect(onClick)
+	return { button = b, top = top, bottom = bottom, stroke = stroke }
 end
 
-local function makeButton(parent: Instance, name: string, order: number): TextButton
-	local button = Instance.new("TextButton")
-	button.Name = name
-	button.LayoutOrder = order
-	button.Size = UDim2.fromOffset(176, 52)
-	button.BackgroundColor3 = Color3.fromRGB(30, 26, 52)
-	button.BorderSizePixel = 0
-	button.Font = Enum.Font.GothamBold
-	button.TextSize = 15
-	button.TextColor3 = Color3.new(1, 1, 1)
-	button.AutoButtonColor = true
-	button.Parent = parent
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 10)
-	corner.Parent = button
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.fromRGB(120, 255, 240)
-	stroke.Thickness = 2
-	stroke.Parent = button
-	return button
-end
+local function buildTop(gui)
+	local banner = UiKit.frame(gui, {
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.fromScale(0.5, 0.012),
+		Size = UDim2.fromScale(0.44, 0.075),
+		BackgroundColor3 = C.Panel,
+		BackgroundTransparency = 0.1,
+	})
+	UiKit.limitSize(banner, 240, 38, 700, 64)
+	UiKit.corner(banner, 0.28)
+	UiKit.stroke(banner, C.Gold, 3)
+	ui.objective = UiKit.label(banner, "Catch a brainrot", { Size = UDim2.fromScale(1, 1), TextColor3 = C.Gold, Font = Enum.Font.GothamBlack }, { MaxText = 30, pad = 0.12 })
 
-function HudController.create(playerGui: PlayerGui)
-	local hud = { state = nil, listeners = {} }
-	local actionRemote = Remotes.get("Action")
-	local stateRemote = Remotes.get("State")
-	local noticeRemote = Remotes.get("Notice")
-
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "KonbiniHud"
-	gui.ResetOnSpawn = false
-	gui.IgnoreGuiInset = false
-	gui.Parent = playerGui
-
-	local moneyLabel = makeLabel(gui, "Money", UDim2.fromOffset(360, 48), UDim2.new(0.5, -180, 0, 8), 40)
-	moneyLabel.TextColor3 = Color3.fromRGB(120, 255, 150)
-	local incomeLabel = makeLabel(gui, "Income", UDim2.fromOffset(360, 26), UDim2.new(0.5, -180, 0, 54), 20)
-	incomeLabel.TextColor3 = Color3.fromRGB(255, 230, 120)
-	local carryLabel = makeLabel(gui, "Carry", UDim2.fromOffset(460, 26), UDim2.new(0.5, -230, 0, 82), 18)
-	local rebirthLabel = makeLabel(gui, "Rebirth", UDim2.fromOffset(200, 24), UDim2.new(1, -212, 0, 10), 18)
-	rebirthLabel.TextXAlignment = Enum.TextXAlignment.Right
-	rebirthLabel.TextColor3 = Color3.fromRGB(255, 130, 220)
-
-	local noticeLabel = makeLabel(gui, "Notice", UDim2.fromOffset(620, 34), UDim2.new(0.5, -310, 0, 112), 22)
-	noticeLabel.TextTransparency = 1
-	noticeLabel.TextStrokeTransparency = 1
-
-	local banner = Instance.new("Frame")
-	banner.Name = "TideBanner"
-	banner.Size = UDim2.fromOffset(640, 84)
-	banner.Position = UDim2.new(0.5, -320, 0, 150)
-	banner.BackgroundColor3 = Color3.fromRGB(10, 90, 100)
-	banner.BackgroundTransparency = 0.25
-	banner.Visible = false
-	banner.Parent = gui
-	local bannerCorner = Instance.new("UICorner")
-	bannerCorner.Parent = banner
-	local bannerText = makeLabel(banner, "Text", UDim2.fromScale(1, 1), UDim2.fromScale(0, 0), 30)
-	bannerText.TextColor3 = Color3.fromRGB(150, 255, 245)
-	local bannerStroke = Instance.new("UIStroke")
-	bannerStroke.Color = Color3.fromRGB(60, 255, 235)
-	bannerStroke.Thickness = 3
-	bannerStroke.Parent = banner
-
-	local bar = Instance.new("Frame")
-	bar.Name = "ButtonBar"
-	bar.Size = UDim2.fromOffset(920, 56)
-	bar.Position = UDim2.new(0.5, -460, 1, -70)
-	bar.BackgroundTransparency = 1
-	bar.Parent = gui
-	local layout = Instance.new("UIListLayout")
-	layout.FillDirection = Enum.FillDirection.Horizontal
-	layout.Padding = UDim.new(0, 8)
-	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Parent = bar
-
-	local tierButton = makeButton(bar, "UnlockTier", 1)
-	local bootsButton = makeButton(bar, "Boots", 2)
-	local rebirthButton = makeButton(bar, "RebirthButton", 3)
-	local codexButton = makeButton(bar, "CodexButton", 4)
-	codexButton.Text = "CODEX  [C]"
-	tierButton.Activated:Connect(function()
-		actionRemote:FireServer("UnlockTier")
-	end)
-	bootsButton.Activated:Connect(function()
-		actionRemote:FireServer("Boots")
-	end)
-	rebirthButton.Activated:Connect(function()
-		actionRemote:FireServer("Rebirth")
-	end)
-	codexButton.Activated:Connect(function()
-		for _, callback in ipairs(hud.listeners) do
-			callback("toggleCodex")
-		end
-	end)
-
-	local function refresh(state)
-		hud.state = state
-		moneyLabel.Text = "$" .. Economy.formatMoney(state.money)
-		incomeLabel.Text = "+$" .. Economy.formatMoney(state.income) .. " / sec"
-		rebirthLabel.Text = "REBIRTH " .. state.rebirths .. "  (x" .. Economy.rebirthMultiplier(state.rebirths) .. ")"
-		if state.carrying then
-			carryLabel.Text = "CARRYING! Run to your base!   [Q] drop"
-			carryLabel.TextColor3 = Color3.fromRGB(255, 220, 90)
-		else
-			carryLabel.Text = state.lockLeft > 0 and ("Base LOCKED  " .. state.lockLeft .. "s") or "Catch brainrots (hold E)"
-			carryLabel.TextColor3 = state.lockLeft > 0 and Color3.fromRGB(255, 110, 110) or Color3.fromRGB(220, 220, 255)
-		end
-		if state.tierCost then
-			local nextRarity = Rarity.list[state.tier + 1]
-			tierButton.Text = "UNLOCK " .. string.upper(nextRarity.name) .. "\n$" .. Economy.formatMoney(state.tierCost)
-		else
-			tierButton.Text = "ALL TIERS\nUNLOCKED"
-		end
-		bootsButton.Text = state.bootsCost and ("DASH BOOTS Lv" .. (state.boots + 1) .. "\n$" .. Economy.formatMoney(state.bootsCost)) or "BOOTS MAX"
-		rebirthButton.Text = "REBIRTH\n$" .. Economy.formatMoney(state.rebirthCost)
-		rebirthButton.UIStroke.Color = state.money >= state.rebirthCost and Color3.fromRGB(255, 130, 220) or Color3.fromRGB(120, 255, 240)
-		for _, callback in ipairs(hud.listeners) do
-			callback("state", state)
-		end
+	local row = UiKit.frame(gui, {
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.fromScale(0.5, 0.095),
+		Size = UDim2.fromScale(0.44, 0.058),
+		BackgroundTransparency = 1,
+	})
+	UiKit.limitSize(row, 240, 28, 700, 46)
+	ui.chips = {}
+	for i, s in ipairs(STEPS) do
+		local chip = UiKit.frame(row, {
+			Position = UDim2.fromScale((i - 1) * 0.25, 0),
+			Size = UDim2.fromScale(0.235, 1),
+			BackgroundColor3 = C.Panel,
+			BackgroundTransparency = 0.25,
+		})
+		UiKit.corner(chip, 0.3)
+		local stroke = UiKit.stroke(chip, C.Dim, 2)
+		local label = UiKit.label(chip, s[1] .. " " .. s[2], { Size = UDim2.fromScale(1, 1), TextColor3 = C.Dim }, { MaxText = 20, pad = 0.1 })
+		ui.chips[i] = { frame = chip, stroke = stroke, label = label, color = s[3] }
 	end
-	stateRemote.OnClientEvent:Connect(refresh)
+end
 
-	local noticeToken = 0
-	noticeRemote.OnClientEvent:Connect(function(text: string, kind: string)
-		noticeToken += 1
-		local token = noticeToken
-		noticeLabel.Text = text
-		noticeLabel.TextColor3 = NOTICE_COLORS[kind] or NOTICE_COLORS.info
-		noticeLabel.TextTransparency = 0
-		noticeLabel.TextStrokeTransparency = 0.3
-		task.delay(3, function()
-			if token == noticeToken then
-				TweenService:Create(noticeLabel, TweenInfo.new(0.5), { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+local function buildWallet(gui)
+	local panel = UiKit.frame(gui, {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.fromScale(0.988, 0.012),
+		Size = UDim2.fromScale(0.2, 0.15),
+		BackgroundTransparency = 0.1,
+	})
+	UiKit.limitSize(panel, 150, 84, 280, 130)
+	UiKit.corner(panel, 0.16)
+	UiKit.stroke(panel, C.Mint, 2)
+	ui.money = UiKit.label(panel, "$0", { Size = UDim2.fromScale(1, 0.52), TextColor3 = C.Mint, Font = Enum.Font.GothamBlack }, { MaxText = 38, pad = 0.05 })
+	ui.rate = UiKit.label(panel, "+$0/s", { Position = UDim2.fromScale(0, 0.52), Size = UDim2.fromScale(1, 0.24), TextColor3 = C.Gold }, { MaxText = 20, pad = 0.05 })
+	ui.rebirth = UiKit.label(panel, "REBIRTH 0", { Position = UDim2.fromScale(0, 0.76), Size = UDim2.fromScale(1, 0.22), TextColor3 = C.Pink }, { MaxText = 16, pad = 0.05 })
+
+	local codex = UiKit.button(gui, "CODEX [C]", {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.fromScale(0.988, 0.175),
+		Size = UDim2.fromScale(0.1, 0.05),
+		BackgroundColor3 = C.PanelLight,
+	}, { MaxText = 20 })
+	UiKit.limitSize(codex, 92, 28, 150, 42)
+	codex.Activated:Connect(function()
+		if openCodex then
+			openCodex()
+		end
+	end)
+end
+
+local function buildCarry(gui)
+	local panel = UiKit.frame(gui, {
+		Position = UDim2.fromScale(0.014, 0.16),
+		Size = UDim2.fromScale(0.18, 0.12),
+		BackgroundTransparency = 0.1,
+		Visible = false,
+	})
+	UiKit.limitSize(panel, 140, 66, 250, 100)
+	UiKit.corner(panel, 0.16)
+	ui.carryStroke = UiKit.stroke(panel, C.Gold, 3)
+	UiKit.label(panel, "CARRYING", { Size = UDim2.fromScale(1, 0.22), TextColor3 = C.Dim }, { MaxText = 14, pad = 0.05 })
+	ui.carryName = UiKit.label(panel, "", { Position = UDim2.fromScale(0, 0.22), Size = UDim2.fromScale(1, 0.38), Font = Enum.Font.GothamBlack }, { MaxText = 26, pad = 0.04 })
+	local drop = UiKit.button(panel, "DROP [Q]", {
+		Position = UDim2.fromScale(0.1, 0.64),
+		Size = UDim2.fromScale(0.8, 0.31),
+		BackgroundColor3 = C.Red,
+	}, { MaxText = 18, pad = 0.1 })
+	drop.Activated:Connect(function()
+		sendAction("Drop")
+	end)
+	ui.carryPanel = panel
+end
+
+local function buildButtons(gui)
+	local row = UiKit.frame(gui, {
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.fromScale(0.5, 0.985),
+		Size = UDim2.fromScale(0.56, 0.105),
+		BackgroundTransparency = 1,
+	})
+	UiKit.limitSize(row, 320, 52, 780, 78)
+	ui.tierBtn = twoLineButton(row, 0, "TIER", function() sendAction("BuyTier") end)
+	ui.bootsBtn = twoLineButton(row, 0.255, "BOOTS", function() sendAction("BuyBoots") end)
+	ui.rebirthBtn = twoLineButton(row, 0.51, "REBIRTH", function() sendAction("Rebirth") end)
+	ui.lockBtn = twoLineButton(row, 0.765, "LOCK BASE", function() sendAction("Lock") end)
+end
+
+local function setChip(i, active)
+	local chip = ui.chips[i]
+	if active then
+		chip.frame.BackgroundTransparency = 0
+		chip.frame.BackgroundColor3 = chip.color
+		chip.stroke.Color = Color3.new(1, 1, 1)
+		chip.label.TextColor3 = Color3.fromRGB(30, 25, 60)
+	else
+		chip.frame.BackgroundTransparency = 0.25
+		chip.frame.BackgroundColor3 = C.Panel
+		chip.stroke.Color = C.Dim
+		chip.label.TextColor3 = C.Dim
+	end
+end
+
+local function refreshGoal(goal)
+	ui.objective.Text = goal.text
+	for i = 1, #STEPS do
+		setChip(i, i == goal.step)
+	end
+end
+
+local function refreshState(s)
+	ui.money.Text = Economy.money(s.money)
+	ui.rate.Text = "+" .. Economy.money(s.income) .. "/s"
+	ui.rebirth.Text = "REBIRTH " .. s.rebirths .. "  |  " .. s.tierName:upper()
+
+	ui.carryPanel.Visible = s.carrying ~= nil
+	if s.carrying then
+		local def = Characters.get(s.carrying.charId)
+		local mut = s.carrying.mutation ~= "None" and (s.carrying.mutation:upper() .. " ") or ""
+		ui.carryName.Text = mut .. def.name
+		local col = Rarity.get(Rarity.indexOf(def.rarity)).color
+		ui.carryName.TextColor3 = col
+		ui.carryStroke.Color = col
+	end
+
+	if s.nextTierName then
+		ui.tierBtn.top.Text = "UNLOCK " .. s.nextTierName:upper()
+		ui.tierBtn.bottom.Text = Economy.money(s.nextTierCost)
+	else
+		ui.tierBtn.top.Text = "ALL TIERS"
+		ui.tierBtn.bottom.Text = "UNLOCKED"
+	end
+	if s.bootsCost then
+		ui.bootsBtn.top.Text = "BOOTS " .. s.boots .. "/" .. Economy.BootsMax
+		ui.bootsBtn.bottom.Text = Economy.money(s.bootsCost)
+	else
+		ui.bootsBtn.top.Text = "BOOTS MAX"
+		ui.bootsBtn.bottom.Text = "FAST!"
+	end
+	ui.rebirthBtn.top.Text = "REBIRTH"
+	ui.rebirthBtn.bottom.Text = Economy.money(s.rebirthCost)
+	if s.lockLeft > 0 then
+		ui.lockBtn.top.Text = "LOCKED"
+		ui.lockBtn.bottom.Text = math.ceil(s.lockLeft) .. "s left"
+	else
+		ui.lockBtn.top.Text = "LOCK BASE"
+		ui.lockBtn.bottom.Text = Economy.money(Config.LockCost) .. " / " .. Config.LockSeconds .. "s"
+	end
+
+	ui.afford = {
+		tier = s.nextTierCost ~= nil and s.money >= s.nextTierCost,
+		boots = s.bootsCost ~= nil and s.money >= s.bootsCost,
+		rebirth = s.money >= s.rebirthCost,
+	}
+end
+
+function HudController.start(actionFn, codexFn)
+	sendAction = actionFn
+	openCodex = codexFn
+	local gui = UiKit.screenGui("KonbiniHud", 2)
+	buildTop(gui)
+	buildWallet(gui)
+	buildCarry(gui)
+	buildButtons(gui)
+	gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+
+	refreshGoal(ClientState.goal)
+	ClientState.GoalChanged:Connect(refreshGoal)
+	ClientState.SnapshotChanged:Connect(refreshState)
+	if ClientState.snapshot then
+		refreshState(ClientState.snapshot)
+	end
+
+	-- affordable upgrade buttons pulse so the eye lands on them
+	RunService.Heartbeat:Connect(function()
+		local a = ui.afford
+		if not a then
+			return
+		end
+		local pulse = 0.5 + 0.5 * math.sin(os.clock() * 6)
+		local function glow(btn, on)
+			if on then
+				btn.stroke.Color = C.Pink:Lerp(Color3.new(1, 1, 1), pulse)
+				btn.stroke.Thickness = 3 + pulse * 3
+				btn.button.BackgroundColor3 = C.PanelLight:Lerp(C.Pink, 0.35 * pulse)
+			else
+				btn.stroke.Color = C.Dim
+				btn.stroke.Thickness = 2
+				btn.button.BackgroundColor3 = C.PanelLight
 			end
-		end)
-	end)
-
-	function hud.showBanner(text: string?)
-		banner.Visible = text ~= nil
-		if text then
-			bannerText.Text = text
 		end
-	end
-
-	function hud.listen(callback)
-		table.insert(hud.listeners, callback)
-	end
-
-	return hud
+		glow(ui.tierBtn, a.tier)
+		glow(ui.bootsBtn, a.boots)
+		glow(ui.rebirthBtn, a.rebirth)
+	end)
+	return gui
 end
 
 return HudController

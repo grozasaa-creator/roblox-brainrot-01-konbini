@@ -1,37 +1,45 @@
--- 6段階のレア度。order が大きいほど希少。weight は野良スポーン時の重み、belt はベルトで買えるか。
+-- Rarity ladder. Index 1 is the lowest. A player's "tier" is the highest index they may catch.
+
 local Rarity = {}
 
-Rarity.list = {
-	{ name = "Common", order = 1, color = Color3.fromRGB(235, 235, 235), weight = 52, belt = true, tierCost = 0 },
-	{ name = "Rare", order = 2, color = Color3.fromRGB(70, 150, 255), weight = 26, belt = true, tierCost = 500 },
-	{ name = "Epic", order = 3, color = Color3.fromRGB(180, 90, 255), weight = 13, belt = true, tierCost = 6000 },
-	{ name = "Legendary", order = 4, color = Color3.fromRGB(255, 200, 40), weight = 6, belt = false, tierCost = 70000 },
-	{ name = "Mythic", order = 5, color = Color3.fromRGB(255, 90, 200), weight = 2.5, belt = false, tierCost = 700000 },
-	{ name = "Secret", order = 6, color = Color3.fromRGB(20, 20, 20), weight = 0.5, belt = false, tierCost = 6000000 },
+Rarity.List = {
+	{ name = "Common",    weight = 52,  color = Color3.fromRGB(190, 200, 215), tierCost = 0 },
+	{ name = "Rare",      weight = 26,  color = Color3.fromRGB(80, 165, 255),  tierCost = 500 },
+	{ name = "Epic",      weight = 13,  color = Color3.fromRGB(195, 105, 255), tierCost = 6000 },
+	{ name = "Legendary", weight = 6,   color = Color3.fromRGB(255, 195, 45),  tierCost = 70000 },
+	{ name = "Mythic",    weight = 2.5, color = Color3.fromRGB(255, 85, 105),  tierCost = 700000 },
+	{ name = "Secret",    weight = 0.5, color = Color3.fromRGB(60, 255, 205),  tierCost = 6000000 },
 }
 
-Rarity.byName = {}
-for _, r in ipairs(Rarity.list) do
-	Rarity.byName[r.name] = r
+Rarity.Count = #Rarity.List
+
+function Rarity.get(index)
+	return Rarity.List[math.clamp(index, 1, Rarity.Count)]
 end
 
-function Rarity.pickWeighted(maxOrder: number?, beltOnly: boolean?)
+function Rarity.indexOf(name)
+	for i, r in ipairs(Rarity.List) do
+		if r.name == name then
+			return i
+		end
+	end
+	return 1
+end
+
+-- weighted pick of a rarity index; rng is a Random
+function Rarity.roll(rng)
 	local total = 0
-	for _, r in ipairs(Rarity.list) do
-		if (not maxOrder or r.order <= maxOrder) and (not beltOnly or r.belt) then
-			total += r.weight
+	for _, r in ipairs(Rarity.List) do
+		total += r.weight
+	end
+	local pick = rng:NextNumber() * total
+	for i, r in ipairs(Rarity.List) do
+		pick -= r.weight
+		if pick <= 0 then
+			return i
 		end
 	end
-	local roll = math.random() * total
-	for _, r in ipairs(Rarity.list) do
-		if (not maxOrder or r.order <= maxOrder) and (not beltOnly or r.belt) then
-			roll -= r.weight
-			if roll <= 0 then
-				return r
-			end
-		end
-	end
-	return Rarity.list[1]
+	return 1
 end
 
 return Rarity

@@ -1,30 +1,41 @@
 # Konbini Brainrot
 
-A 3D Roblox game for make.fun's roblox-brainrot-01 bounty. A neon-lit night town of convenience stores is overrun by
-original "brainrot" critters. Catch them, run them home, and let them earn while you are away.
+A night-time konbini town where brainrot creatures drift down the street. Catch one, carry it home,
+put it on a pedestal and let it earn. Built for the make.fun bounty roblox-brainrot-01.
 
-## The loop
+Play: https://www.roblox.com/games/137333790241386
 
-1. Hold E on a wild critter to catch it. Carrying it slows you down.
-2. Run it into your own base: it is placed on a pedestal and starts earning money per second.
-3. Collect the pedestal's meter, then spend it: buy critters off the conveyor belt, unlock the next rarity tier,
-   buy dash boots, or rebirth for a permanent income multiplier.
+## Loop
+1. Hold **E** on a drifting brainrot to catch it (the yellow arrow and the chevron trail show you where).
+2. Carry it to your base (you move slower while carrying). Press **E** on a glowing empty pedestal.
+3. Money builds up on the pedestal. Walk onto the pad or press **E** to collect.
+4. Spend it: unlock the next rarity tier, buy boots, or rebirth for a permanent multiplier.
 
-15 original characters in 6 rarity tiers (Common, Rare, Epic, Legendary, Mythic, Secret), with three mutations
-(Gold, Neon, Glitch) that multiply income. A Codex (press C) tracks what you have found.
-
-## Threats
-
-- **Neon Tide**: a warning, then a wave sweeps the street. Be inside a base or a konbini or you drop what you carry.
-- **Stealing**: hold F near a carried critter or a pedestal to take it. Lock your base to protect your pedestals.
-- **Security robots** patrol the street and make carriers drop their catch.
+## Content
+- 15 characters across 6 rarities (Common to Secret), 3 mutations (Gold x2, Neon x3, Glitch x5), 8 pedestals per base.
+- Threats: the **NEON TIDE** wave (get inside a base or the konbini), other players stealing from unlocked
+  pedestals, and patrol robots that stun you.
+- Keys: **E** interact, **Q** drop, **C** codex. Everything also has an on-screen button.
 
 ## Layout
+- `src/shared` config, rarity, mutations, economy, characters, shape helpers
+- `src/server` world builder, state, spawning, carry, bases, stealing, tide, patrol, saving
+- `src/client` HUD, guide (arrows, chevron trail, pillar), prompt gating, effects, codex
+- `default.project.json` Rojo project; `game.rbxl` is built from it
+- `main.ts` stages the submission dossier (Node 22): `MAKEFUN_OUTPUT_DIR=out node main.ts`
 
-- `src/shared`: constants, rarity, mutations, characters, character models, economy, remotes.
-- `src/server`: one service per responsibility (world, base, spawn, carry, steal, patrol, tide, actions, state, saving).
-- `src/client`: display and input only (HUD, labels, carry keys, effects, codex). The server decides everything.
-- `default.project.json`: Rojo project. `rojo build default.project.json --output game.rbxl` builds `game.rbxl`.
-- `main.ts`: hands the entry in (copies `game.rbxl`, `src/`, `screenshots/`, `PLAY.json` and writes `dossier.json`).
+## Build
+```
+rojo build default.project.json --output game.rbxl
+MAKEFUN_OUTPUT_DIR=out node main.ts
+```
 
-    mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+## Visibility, guidance and text fit
+- Lighting is bright (Brightness 3.5, Ambient and OutdoorAmbient raised, ExposureCompensation 0.9) with lamps,
+  light ground and glowing pedestals so ground, pedestals and characters read clearly.
+- Guidance without text: step chips, a chevron trail to the current goal, a bobbing arrow with highlight,
+  a neon pillar on base/pad goals, and a safe-zone goal while the tide is out.
+- Every label is TextScaled with padding and a size cap, inside frames with size constraints.
+
+## License
+MIT

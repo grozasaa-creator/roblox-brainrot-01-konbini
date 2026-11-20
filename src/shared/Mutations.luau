@@ -1,33 +1,35 @@
--- 変異3種。出現時にランダムで付き、収入と価格が倍になる。
+-- Rare cosmetic mutations that multiply a character's income.
+
 local Mutations = {}
 
-Mutations.list = {
-	{ id = "Gold", multiplier = 2, chance = 0.08, color = Color3.fromRGB(255, 200, 40), material = Enum.Material.Metal },
-	{ id = "Neon", multiplier = 3, chance = 0.04, color = Color3.fromRGB(60, 255, 230), material = Enum.Material.Neon },
-	{ id = "Glitch", multiplier = 5, chance = 0.015, color = Color3.fromRGB(255, 40, 200), material = Enum.Material.Neon },
+Mutations.None = "None"
+
+Mutations.Defs = {
+	Gold   = { mult = 2, chance = 0.08,  tint = Color3.fromRGB(255, 205, 60),  material = Enum.Material.Metal },
+	Neon   = { mult = 3, chance = 0.04,  tint = Color3.fromRGB(70, 255, 235),  material = Enum.Material.Neon },
+	Glitch = { mult = 5, chance = 0.015, tint = Color3.fromRGB(255, 70, 225),  material = Enum.Material.Neon },
 }
 
-Mutations.byId = {}
-for _, m in ipairs(Mutations.list) do
-	Mutations.byId[m.id] = m
+-- stable order for rolling so results do not depend on pairs()
+Mutations.Order = { "Gold", "Neon", "Glitch" }
+
+function Mutations.multiplier(name)
+	local d = Mutations.Defs[name]
+	return d and d.mult or 1
 end
 
--- 変異なしは nil を返す。レアな変異ほど先に判定する。
-function Mutations.roll(): string?
-	for i = #Mutations.list, 1, -1 do
-		local m = Mutations.list[i]
-		if math.random() < m.chance then
-			return m.id
+function Mutations.roll(rng)
+	local r = rng:NextNumber()
+	local edge = 0
+	-- check rarest first so the 1.5% really is 1.5%
+	for i = #Mutations.Order, 1, -1 do
+		local name = Mutations.Order[i]
+		edge += Mutations.Defs[name].chance
+		if r < edge then
+			return name
 		end
 	end
-	return nil
-end
-
-function Mutations.multiplierOf(mutationId: string?): number
-	if mutationId and Mutations.byId[mutationId] then
-		return Mutations.byId[mutationId].multiplier
-	end
-	return 1
+	return Mutations.None
 end
 
 return Mutations

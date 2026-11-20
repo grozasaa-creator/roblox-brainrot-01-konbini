@@ -28,25 +28,26 @@
       "$properties": {
         "FilteringEnabled": true
       },
-      "Baseplate": {
+      "Ground": {
         "$className": "Part",
         "$properties": {
           "Anchored": true,
-          "Color": [0.09, 0.09, 0.12],
+          "Color": [0.42, 0.40, 0.58],
           "Locked": true,
-          "Material": "Asphalt",
-          "Position": [0, -10, 0],
-          "Size": [700, 20, 700]
+          "Material": "SmoothPlastic",
+          "Position": [0, -1, 0],
+          "Size": [760, 2, 760]
         }
       }
     },
     "Lighting": {
       "$properties": {
-        "Ambient": [0.2, 0.18, 0.32],
-        "Brightness": 2,
-        "ClockTime": 20.5,
+        "Ambient": [0.55, 0.51, 0.74],
+        "OutdoorAmbient": [0.65, 0.61, 0.84],
+        "Brightness": 3.5,
+        "ClockTime": 19,
+        "ExposureCompensation": 0.9,
         "GlobalShadows": true,
-        "Outlines": false,
         "Technology": "ShadowMap"
       }
     },

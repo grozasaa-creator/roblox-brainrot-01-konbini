@@ -1,36 +1,41 @@
--- RemoteEvent の取得口。サーバーが無ければ作り、クライアントは待つ。
+-- One folder of RemoteEvents. The server creates it, the client waits for it.
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
+local FOLDER = "KonbiniRemotes"
+local NAMES = { "State", "Action", "Notice", "Tide" }
+
 local Remotes = {}
 
-local function getFolder(): Folder
-	local existing = ReplicatedStorage:FindFirstChild("KonbiniRemotes")
-	if existing then
-		return existing
-	end
-	if RunService:IsServer() then
-		local folder = Instance.new("Folder")
-		folder.Name = "KonbiniRemotes"
+function Remotes.server()
+	assert(RunService:IsServer(), "Remotes.server called on the client")
+	local folder = ReplicatedStorage:FindFirstChild(FOLDER)
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = FOLDER
 		folder.Parent = ReplicatedStorage
-		return folder
 	end
-	return ReplicatedStorage:WaitForChild("KonbiniRemotes")
+	local out = {}
+	for _, n in ipairs(NAMES) do
+		local ev = folder:FindFirstChild(n)
+		if not ev then
+			ev = Instance.new("RemoteEvent")
+			ev.Name = n
+			ev.Parent = folder
+		end
+		out[n] = ev
+	end
+	return out
 end
 
-function Remotes.get(name: string): RemoteEvent
-	local folder = getFolder()
-	local existing = folder:FindFirstChild(name)
-	if existing then
-		return existing
+function Remotes.client()
+	local folder = ReplicatedStorage:WaitForChild(FOLDER)
+	local out = {}
+	for _, n in ipairs(NAMES) do
+		out[n] = folder:WaitForChild(n)
 	end
-	if RunService:IsServer() then
-		local remote = Instance.new("RemoteEvent")
-		remote.Name = name
-		remote.Parent = folder
-		return remote
-	end
-	return folder:WaitForChild(name)
+	return out
 end
 
 return Remotes
